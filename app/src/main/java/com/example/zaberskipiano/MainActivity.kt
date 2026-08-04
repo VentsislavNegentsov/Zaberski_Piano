@@ -79,7 +79,7 @@ fun PianoScreen() {
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
     var sustainEnabled by remember { mutableStateOf(false) }
 
-    // Sensor readings & Peak Hold logic
+    // Sensor readings & Peak Hold logic (100ms decay)
     var liveShakeMagnitude by remember { mutableFloatStateOf(0f) }
     var maxShakeMagnitude by remember { mutableFloatStateOf(0f) }
     var maxResetJob by remember { mutableStateOf<Job?>(null) }
@@ -110,8 +110,9 @@ fun PianoScreen() {
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     }
 
+    // Dynamic volume scaling with max acceleration at 0.1f
     fun getDynamicVolume(magnitude: Float): Float {
-        val normalized = (magnitude / 0.1f).coerceIn(0f, 1f) 
+        val normalized = (magnitude / 0.1f).coerceIn(0f, 1f)
         return (0.15f + normalized * 0.85f).coerceIn(0.15f, 1.0f)
     }
 
@@ -127,12 +128,12 @@ fun PianoScreen() {
                     val magnitude = sqrt(x * x + y * y + z * z)
                     liveShakeMagnitude = magnitude
 
-                    // Track maximum acceleration with 0.5 second decay
+                    // Track peak acceleration with fast 100ms decay
                     if (magnitude > maxShakeMagnitude) {
                         maxShakeMagnitude = magnitude
                         maxResetJob?.cancel()
                         maxResetJob = coroutineScope.launch {
-                            delay(500L)
+                            delay(100L)
                             maxShakeMagnitude = 0f
                         }
                     }
@@ -198,7 +199,7 @@ fun PianoScreen() {
         val started = newExpandedNotes - activeMidiNotes
         val ended = activeMidiNotes - newExpandedNotes
 
-        // Capture dynamic volume using exact sensor magnitude at the moment of key strike
+        // Capture peak acceleration within the 100ms window (or live fallback)
         val effectiveMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
         val initialVol = getDynamicVolume(effectiveMagnitude)
 
@@ -286,7 +287,7 @@ fun PianoScreen() {
                 }
             }
 
-            // Dual High-Visibility Debug Sensor Display (LIVE + MAX DECAY)
+            // Dual High-Visibility Debug Sensor Display
             Box(
                 modifier = Modifier
                     .background(Color(0xFF2E0000), RoundedCornerShape(8.dp))
@@ -315,7 +316,7 @@ fun PianoScreen() {
                         }
                         Text("|", color = Color.Red, fontSize = 18.sp)
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("MAX (0.5s)", color = Color.Gray, fontSize = 9.sp)
+                            Text("MAX (100ms)", color = Color.Gray, fontSize = 9.sp)
                             Text(
                                 text = String.format(Locale.US, "%.3f", maxShakeMagnitude),
                                 color = Color(0xFFFF9800),
