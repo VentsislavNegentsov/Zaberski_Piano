@@ -6,7 +6,8 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -15,7 +16,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.pow
@@ -41,7 +44,9 @@ fun PianoScreen() {
     val context = LocalContext.current
     var currentOctave by remember { mutableFloatStateOf(3f) }
 
-    // High-performance low-latency SoundPool engine
+    val amberColor = Color(0xFFFFB300)
+
+    // High-performance SoundPool engine
     val soundPool = remember {
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_GAME)
@@ -65,7 +70,6 @@ fun PianoScreen() {
             }
         }
 
-        // Map lowercase file names to MIDI note values
         loadSample("c2", 36)
         loadSample("c3", 48)
         loadSample("c4", 60)
@@ -78,18 +82,16 @@ fun PianoScreen() {
         }
     }
 
-    // Play note by selecting the nearest anchor sample
+    // Play note audio
     fun playNote(octave: Int, semitone: Int) {
         val midiNote = (octave + 1) * 12 + semitone
 
-        // Find nearest C sample (36, 48, 60, 72, 84, or 96)
         val anchors = listOf(36, 48, 60, 72, 84, 96)
         val baseMidi = anchors.minByOrNull { kotlin.math.abs(it - midiNote) } ?: 60
 
         val soundId = soundMap[baseMidi] ?: 0
         if (soundId == 0) return
 
-        // Calculate minimal pitch shift ratio
         val semitoneDiff = midiNote - baseMidi
         val rate = 2.0.pow(semitoneDiff / 12.0).toFloat().coerceIn(0.5f, 2.0f)
 
@@ -102,29 +104,51 @@ fun PianoScreen() {
             .padding(8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- TOP BAR: Octave Slider ---
+        // --- TOP BAR: Title Frame & Octave Control ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Text(
-                text = "Base Octave: ${currentOctave.toInt()}",
-                color = Color.White,
-                fontSize = 16.sp
-            )
-            Slider(
-                value = currentOctave,
-                onValueChange = { currentOctave = it },
-                valueRange = 1f..6f,
-                steps = 4,
-                modifier = Modifier.width(300.dp)
-            )
+            // Dedicated Amber Frame Badge
+            Box(
+                modifier = Modifier
+                    .border(
+                        width = 1.dp,
+                        color = amberColor,
+                        shape = RoundedCornerShape(8.dp)
+                    )
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "Zaberski Piano : dedicated to Zaberski father & son",
+                    color = amberColor,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            // Octave Control
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Base Octave: ${currentOctave.toInt()}",
+                    color = Color.White,
+                    fontSize = 14.sp,
+                    modifier = Modifier.padding(end = 8.dp)
+                )
+                Slider(
+                    value = currentOctave,
+                    onValueChange = { currentOctave = it },
+                    valueRange = 1f..6f,
+                    steps = 4,
+                    modifier = Modifier.width(220.dp)
+                )
+            }
         }
 
-        // --- PIANO KEYBOARD ---
+        // --- PIANO KEYBOARD AREA ---
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -147,30 +171,18 @@ fun PianoScreen() {
                         val octave = baseOctave + octaveOffset
                         val semitone = semitones[index]
 
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .padding(horizontal = 1.dp)
-                                .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
-                                .background(Color.White)
-                                .clickable {
-                                    playNote(octave, semitone)
-                                },
-                            contentAlignment = Alignment.BottomCenter
-                        ) {
-                            Text(
-                                text = "$name$octave",
-                                color = Color.DarkGray,
-                                fontSize = 12.sp,
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
-                        }
+                        WhiteKey(
+                            name = name,
+                            octave = octave,
+                            semitone = semitone,
+                            onPlayNote = ::playNote,
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
 
-            // 10 Black Keys Overlay
+            // 10 Black Keys
             val blackKeyWidth = whiteKeyWidth * 0.6f
             val blackKeyPositions = listOf(
                 Triple(0, 1, "C#"), Triple(1, 3, "D#"),
@@ -183,18 +195,79 @@ fun PianoScreen() {
                 val octave = baseOctave + (if (whiteIndex >= 7) 1 else 0)
                 val xOffset = (whiteKeyWidth * (whiteIndex + 1)) - (blackKeyWidth / 2)
 
-                Box(
+                BlackKey(
+                    octave = octave,
+                    semitone = semitone,
+                    onPlayNote = ::playNote,
                     modifier = Modifier
                         .width(blackKeyWidth)
                         .fillMaxHeight(0.58f)
                         .offset(x = xOffset)
-                        .clip(RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp))
-                        .background(Color(0xFF151515))
-                        .clickable {
-                            playNote(octave, semitone)
-                        }
                 )
             }
         }
     }
+}
+
+@Composable
+fun WhiteKey(
+    name: String,
+    octave: Int,
+    semitone: Int,
+    onPlayNote: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .padding(horizontal = 1.dp)
+            .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
+            .background(if (isPressed) Color(0xFFDCDCDC) else Color.White)
+            .pointerInput(octave, semitone) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        onPlayNote(octave, semitone)
+                        tryAwaitRelease()
+                        isPressed = false
+                    }
+                )
+            },
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Text(
+            text = "$name$octave",
+            color = Color.DarkGray,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(bottom = 8.dp)
+        )
+    }
+}
+
+@Composable
+fun BlackKey(
+    octave: Int,
+    semitone: Int,
+    onPlayNote: (Int, Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isPressed by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp))
+            .background(if (isPressed) Color(0xFFFFB300) else Color(0xFF151515))
+            .pointerInput(octave, semitone) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        onPlayNote(octave, semitone)
+                        tryAwaitRelease()
+                        isPressed = false
+                    }
+                )
+            }
+    )
 }
