@@ -43,7 +43,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Hide status bar
+        // Hide top status bar (clock, battery, notifications)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.hide(WindowInsetsCompat.Type.statusBars())
@@ -72,13 +72,8 @@ fun PianoScreen() {
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
     var sustainEnabled by remember { mutableStateOf(false) }
 
-    // Active MIDI notes triggered by direct user touches
     val directPressedNotes = remember { mutableStateSetOf<Int>() }
-
-    // Set of all visually/audibly active notes (including chord expansion)
     val activeMidiNotes = remember { mutableStateSetOf<Int>() }
-
-    // Track sound streams for damper fade-out
     val activeStreams = remember { mutableStateMapOf<Int, Int>() }
 
     val amberColor = Color(0xFFFFB300)
@@ -138,16 +133,13 @@ fun PianoScreen() {
         }
     }
 
-    // Recalculate notes when touches or chord modes change
     fun updateActiveNotes(newDirectNotes: Set<Int>) {
         val newExpandedNotes = mutableSetOf<Int>()
         newDirectNotes.forEach { root ->
             newExpandedNotes.addAll(getChordMidiNotes(root))
         }
 
-        // Notes that just started
         val started = newExpandedNotes - activeMidiNotes
-        // Notes that just ended
         val ended = activeMidiNotes - newExpandedNotes
 
         started.forEach { note ->
@@ -284,14 +276,12 @@ fun PianoScreen() {
                 )
             }
 
-            // Function to map any (X, Y) touch point to a specific MIDI Note
             fun resolveMidiNoteAt(offset: Offset): Int? {
                 val x = offset.x
                 val y = offset.y
 
                 if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
 
-                // Check Black Keys First (Top Overlay)
                 if (y <= blackKeyHeightPx) {
                     blackKeys.forEach { bk ->
                         val left = (whiteKeyWidthPx * (bk.whiteIndex + 1)) - (blackKeyWidthPx / 2f)
@@ -303,7 +293,6 @@ fun PianoScreen() {
                     }
                 }
 
-                // Fallback to White Keys
                 val whiteIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, 13)
                 val whiteSemitones = listOf(0, 2, 4, 5, 7, 9, 11)
                 val octave = baseOctave + (if (whiteIndex >= 7) 1 else 0)
@@ -319,6 +308,10 @@ fun PianoScreen() {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
+
+                                // Explicitly consume event changes so Android OS gesture engine doesn't steal touches
+                                event.changes.forEach { it.consume() }
+
                                 val pressedPointers = event.changes.filter { it.pressed }
 
                                 val currentTouchedNotes = mutableSetOf<Int>()
@@ -329,11 +322,15 @@ fun PianoScreen() {
                                 }
 
                                 updateActiveNotes(currentTouchedNotes)
+
+                                if (event.changes.none { it.pressed }) {
+                                    break
+                                }
                             }
                         }
                     }
             ) {
-                // Visual Rendering: 14 White Keys
+                // Render White Keys
                 Row(modifier = Modifier.fillMaxSize()) {
                     val names = listOf("C", "D", "E", "F", "G", "A", "B")
                     val semitones = listOf(0, 2, 4, 5, 7, 9, 11)
@@ -354,7 +351,7 @@ fun PianoScreen() {
                     }
                 }
 
-                // Visual Rendering: 10 Black Keys
+                // Render Black Keys
                 val density = LocalContext.current.resources.displayMetrics.density
                 blackKeys.forEach { bk ->
                     val octave = baseOctave + (if (bk.whiteIndex >= 7) 1 else 0)
