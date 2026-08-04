@@ -1,5 +1,10 @@
 package com.example.zaberskipiano
 
+import android.content.Context
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.os.Bundle
@@ -27,9 +32,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import java.util.Locale
 import kotlin.math.pow
+import kotlin.math.sqrt
 
 enum class ChordMode { NONE, MAJOR, MINOR }
 
@@ -43,7 +51,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Hide top status bar (clock, battery, notifications)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
         insetsController.hide(WindowInsetsCompat.Type.statusBars())
@@ -72,6 +79,13 @@ fun PianoScreen() {
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
     var sustainEnabled by remember { mutableStateOf(false) }
 
+    // Sensor readings & Peak Hold logic
+    var liveShakeMagnitude by remember { mutableFloatStateOf(0f) }
+    var maxShakeMagnitude by remember { mutableFloatStateOf(0f) }
+    var maxResetJob by remember { mutableStateOf<Job?>(null) }
+
+    var lastPlayedStreamId by remember { mutableIntStateOf(0) }
+
     val directPressedNotes = remember { mutableStateSetOf<Int>() }
     val activeMidiNotes = remember { mutableStateSetOf<Int>() }
     val activeStreams = remember { mutableStateMapOf<Int, Int>() }
@@ -92,7 +106,46 @@ fun PianoScreen() {
 
     val soundMap = remember { mutableMapOf<Int, Int>() }
 
+    val sensorManager = remember {
+        context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+    }
+
+    fun getDynamicVolume(magnitude: Float): Float {
+        val normalized = (magnitude / 0.1f).coerceIn(0f, 1f) 
+        return (0.15f + normalized * 0.85f).coerceIn(0.15f, 1.0f)
+    }
+
     DisposableEffect(Unit) {
+        val accelSensor = sensorManager.getDefaultSensor(Sensor.TYPE_LINEAR_ACCELERATION)
+        val listener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent?) {
+                event?.let {
+                    val x = it.values[0]
+                    val y = it.values[1]
+                    val z = it.values[2]
+
+                    val magnitude = sqrt(x * x + y * y + z * z)
+                    liveShakeMagnitude = magnitude
+
+                    // Track maximum acceleration with 0.5 second decay
+                    if (magnitude > maxShakeMagnitude) {
+                        maxShakeMagnitude = magnitude
+                        maxResetJob?.cancel()
+                        maxResetJob = coroutineScope.launch {
+                            delay(500L)
+                            maxShakeMagnitude = 0f
+                        }
+                    }
+                }
+            }
+
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
+
+        if (accelSensor != null) {
+            sensorManager.registerListener(listener, accelSensor, SensorManager.SENSOR_DELAY_FASTEST)
+        }
+
         val loadSample = { resName: String, midiBase: Int ->
             val resId = context.resources.getIdentifier(resName, "raw", context.packageName)
             if (resId != 0) {
@@ -108,11 +161,14 @@ fun PianoScreen() {
         loadSample("c7", 96)
 
         onDispose {
+            if (accelSensor != null) {
+                sensorManager.unregisterListener(listener)
+            }
             soundPool.release()
         }
     }
 
-    fun playMidiNote(midiNote: Int): Int {
+    fun playMidiNote(midiNote: Int, velocity: Float = 1.0f): Int {
         val anchors = listOf(36, 48, 60, 72, 84, 96)
         val baseMidi = anchors.minByOrNull { kotlin.math.abs(it - midiNote) } ?: 60
 
@@ -122,7 +178,7 @@ fun PianoScreen() {
         val semitoneDiff = midiNote - baseMidi
         val rate = 2.0.pow(semitoneDiff / 12.0).toFloat().coerceIn(0.5f, 2.0f)
 
-        return soundPool.play(soundId, 1.0f, 1.0f, 1, 0, rate)
+        return soundPool.play(soundId, velocity, velocity, 1, 0, rate)
     }
 
     fun getChordMidiNotes(rootMidi: Int): List<Int> {
@@ -142,11 +198,18 @@ fun PianoScreen() {
         val started = newExpandedNotes - activeMidiNotes
         val ended = activeMidiNotes - newExpandedNotes
 
+        // Capture dynamic volume using exact sensor magnitude at the moment of key strike
+        val effectiveMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
+        val initialVol = getDynamicVolume(effectiveMagnitude)
+
         started.forEach { note ->
             activeMidiNotes.add(note)
             activeStreams[note]?.let { soundPool.stop(it) }
-            val streamId = playMidiNote(note)
-            if (streamId != 0) activeStreams[note] = streamId
+            val streamId = playMidiNote(note, initialVol)
+            if (streamId != 0) {
+                activeStreams[note] = streamId
+                lastPlayedStreamId = streamId
+            }
         }
 
         ended.forEach { note ->
@@ -157,7 +220,7 @@ fun PianoScreen() {
                     coroutineScope.launch(Dispatchers.Default) {
                         val steps = 6
                         for (i in steps downTo 0) {
-                            val vol = i / steps.toFloat()
+                            val vol = (i / steps.toFloat()) * initialVol
                             soundPool.setVolume(streamId, vol, vol)
                             delay(20L)
                         }
@@ -175,7 +238,7 @@ fun PianoScreen() {
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .padding(6.dp),
+            .padding(4.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // --- TOP BAR ---
@@ -186,19 +249,85 @@ fun PianoScreen() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            // Title Header
             Box(
                 modifier = Modifier
-                    .border(width = 1.dp, color = amberColor, shape = RoundedCornerShape(8.dp))
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .border(width = 1.5.dp, color = amberColor, shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
-                Text(
-                    text = "Zaberski Piano : dedicated to Zaberski father & son",
-                    color = amberColor,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
+                Column {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "Zaberski Piano",
+                            color = amberColor,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "v1.2",
+                            color = amberColor.copy(alpha = 0.8f),
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+                    Text(
+                        text = "by Ventsislav Negentsov",
+                        color = Color.LightGray,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                    Text(
+                        text = "dedicated to Zaberski father & son",
+                        color = amberColor.copy(alpha = 0.8f),
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Light
+                    )
+                }
             }
 
+            // Dual High-Visibility Debug Sensor Display (LIVE + MAX DECAY)
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF2E0000), RoundedCornerShape(8.dp))
+                    .border(width = 1.dp, color = Color.Red, shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "SENSOR / ACCELERATION",
+                        color = Color.Red,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("LIVE", color = Color.Gray, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "%.3f", liveShakeMagnitude),
+                                color = Color.Yellow,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text("|", color = Color.Red, fontSize = 18.sp)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("MAX (0.5s)", color = Color.Gray, fontSize = 9.sp)
+                            Text(
+                                text = String.format(Locale.US, "%.3f", maxShakeMagnitude),
+                                color = Color(0xFFFF9800),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.ExtraBold
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Controls & Chords
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -237,7 +366,7 @@ fun PianoScreen() {
                 Text(
                     text = "Octave: ${currentOctave.toInt()}",
                     color = Color.White,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     modifier = Modifier.padding(end = 4.dp)
                 )
                 Slider(
@@ -245,7 +374,7 @@ fun PianoScreen() {
                     onValueChange = { currentOctave = it },
                     valueRange = 1f..6f,
                     steps = 4,
-                    modifier = Modifier.width(140.dp)
+                    modifier = Modifier.width(120.dp)
                 )
             }
         }
@@ -309,7 +438,6 @@ fun PianoScreen() {
                             while (true) {
                                 val event = awaitPointerEvent()
 
-                                // Explicitly consume event changes so Android OS gesture engine doesn't steal touches
                                 event.changes.forEach { it.consume() }
 
                                 val pressedPointers = event.changes.filter { it.pressed }
@@ -385,13 +513,13 @@ fun ControlChip(
             .clip(RoundedCornerShape(6.dp))
             .background(if (isActive) activeColor else Color(0xFF333333))
             .clickable { onClick() }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = text,
             color = if (isActive) Color.Black else Color.White,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Bold
         )
     }
