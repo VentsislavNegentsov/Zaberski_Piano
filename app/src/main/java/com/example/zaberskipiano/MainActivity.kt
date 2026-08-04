@@ -7,7 +7,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -15,17 +16,40 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.pow
+
+enum class ChordMode { NONE, MAJOR, MINOR }
+
+data class BlackKeyInfo(
+    val whiteIndex: Int,
+    val semitone: Int,
+    val label: String
+)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Hide status bar
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+        val insetsController = WindowInsetsControllerCompat(window, window.decorView)
+        insetsController.hide(WindowInsetsCompat.Type.statusBars())
+        insetsController.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+
         setContent {
             MaterialTheme {
                 Surface(
@@ -42,11 +66,23 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun PianoScreen() {
     val context = LocalContext.current
-    var currentOctave by remember { mutableFloatStateOf(3f) }
+    val coroutineScope = rememberCoroutineScope()
+
+    var currentOctave by remember { mutableFloatStateOf(4f) }
+    var chordMode by remember { mutableStateOf(ChordMode.NONE) }
+    var sustainEnabled by remember { mutableStateOf(false) }
+
+    // Active MIDI notes triggered by direct user touches
+    val directPressedNotes = remember { mutableStateSetOf<Int>() }
+
+    // Set of all visually/audibly active notes (including chord expansion)
+    val activeMidiNotes = remember { mutableStateSetOf<Int>() }
+
+    // Track sound streams for damper fade-out
+    val activeStreams = remember { mutableStateMapOf<Int, Int>() }
 
     val amberColor = Color(0xFFFFB300)
 
-    // High-performance SoundPool engine
     val soundPool = remember {
         val attributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_GAME)
@@ -54,12 +90,11 @@ fun PianoScreen() {
             .build()
 
         SoundPool.Builder()
-            .setMaxStreams(12)
+            .setMaxStreams(16)
             .setAudioAttributes(attributes)
             .build()
     }
 
-    // Load multi-sampled anchor notes (c2 through c7)
     val soundMap = remember { mutableMapOf<Int, Int>() }
 
     DisposableEffect(Unit) {
@@ -82,73 +117,148 @@ fun PianoScreen() {
         }
     }
 
-    // Play note audio
-    fun playNote(octave: Int, semitone: Int) {
-        val midiNote = (octave + 1) * 12 + semitone
-
+    fun playMidiNote(midiNote: Int): Int {
         val anchors = listOf(36, 48, 60, 72, 84, 96)
         val baseMidi = anchors.minByOrNull { kotlin.math.abs(it - midiNote) } ?: 60
 
         val soundId = soundMap[baseMidi] ?: 0
-        if (soundId == 0) return
+        if (soundId == 0) return 0
 
         val semitoneDiff = midiNote - baseMidi
         val rate = 2.0.pow(semitoneDiff / 12.0).toFloat().coerceIn(0.5f, 2.0f)
 
-        soundPool.play(soundId, 1.0f, 1.0f, 1, 0, rate)
+        return soundPool.play(soundId, 1.0f, 1.0f, 1, 0, rate)
+    }
+
+    fun getChordMidiNotes(rootMidi: Int): List<Int> {
+        return when (chordMode) {
+            ChordMode.NONE -> listOf(rootMidi)
+            ChordMode.MAJOR -> listOf(rootMidi, rootMidi + 4, rootMidi + 7)
+            ChordMode.MINOR -> listOf(rootMidi, rootMidi + 3, rootMidi + 7)
+        }
+    }
+
+    // Recalculate notes when touches or chord modes change
+    fun updateActiveNotes(newDirectNotes: Set<Int>) {
+        val newExpandedNotes = mutableSetOf<Int>()
+        newDirectNotes.forEach { root ->
+            newExpandedNotes.addAll(getChordMidiNotes(root))
+        }
+
+        // Notes that just started
+        val started = newExpandedNotes - activeMidiNotes
+        // Notes that just ended
+        val ended = activeMidiNotes - newExpandedNotes
+
+        started.forEach { note ->
+            activeMidiNotes.add(note)
+            activeStreams[note]?.let { soundPool.stop(it) }
+            val streamId = playMidiNote(note)
+            if (streamId != 0) activeStreams[note] = streamId
+        }
+
+        ended.forEach { note ->
+            activeMidiNotes.remove(note)
+            if (!sustainEnabled) {
+                activeStreams[note]?.let { streamId ->
+                    activeStreams.remove(note)
+                    coroutineScope.launch(Dispatchers.Default) {
+                        val steps = 6
+                        for (i in steps downTo 0) {
+                            val vol = i / steps.toFloat()
+                            soundPool.setVolume(streamId, vol, vol)
+                            delay(20L)
+                        }
+                        soundPool.stop(streamId)
+                    }
+                }
+            }
+        }
+
+        directPressedNotes.clear()
+        directPressedNotes.addAll(newDirectNotes)
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(8.dp),
+            .statusBarsPadding()
+            .padding(6.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // --- TOP BAR: Title Frame & Octave Control ---
+        // --- TOP BAR ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 8.dp, vertical = 4.dp),
+                .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Dedicated Amber Frame Badge
             Box(
                 modifier = Modifier
-                    .border(
-                        width = 1.dp,
-                        color = amberColor,
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .border(width = 1.dp, color = amberColor, shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             ) {
                 Text(
                     text = "Zaberski Piano : dedicated to Zaberski father & son",
                     color = amberColor,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
 
-            // Octave Control
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ControlChip(
+                    text = "Major Chord",
+                    isActive = chordMode == ChordMode.MAJOR,
+                    activeColor = amberColor,
+                    onClick = {
+                        chordMode = if (chordMode == ChordMode.MAJOR) ChordMode.NONE else ChordMode.MAJOR
+                        updateActiveNotes(directPressedNotes.toSet())
+                    }
+                )
+
+                ControlChip(
+                    text = "Minor Chord",
+                    isActive = chordMode == ChordMode.MINOR,
+                    activeColor = amberColor,
+                    onClick = {
+                        chordMode = if (chordMode == ChordMode.MINOR) ChordMode.NONE else ChordMode.MINOR
+                        updateActiveNotes(directPressedNotes.toSet())
+                    }
+                )
+
+                ControlChip(
+                    text = "Sustain",
+                    isActive = sustainEnabled,
+                    activeColor = Color(0xFF4CAF50),
+                    onClick = {
+                        sustainEnabled = !sustainEnabled
+                    }
+                )
+            }
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = "Base Octave: ${currentOctave.toInt()}",
+                    text = "Octave: ${currentOctave.toInt()}",
                     color = Color.White,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(end = 8.dp)
+                    fontSize = 11.sp,
+                    modifier = Modifier.padding(end = 4.dp)
                 )
                 Slider(
                     value = currentOctave,
                     onValueChange = { currentOctave = it },
                     valueRange = 1f..6f,
                     steps = 4,
-                    modifier = Modifier.width(220.dp)
+                    modifier = Modifier.width(140.dp)
                 )
             }
         }
 
-        // --- PIANO KEYBOARD AREA ---
+        // --- GLOBAL MULTI-TOUCH PIANO KEYBOARD ---
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -156,118 +266,172 @@ fun PianoScreen() {
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color.Black)
         ) {
-            val totalWidth = maxWidth
+            val totalWidthPx = constraints.maxWidth.toFloat()
+            val totalHeightPx = constraints.maxHeight.toFloat()
             val baseOctave = currentOctave.toInt()
+
             val numWhiteKeys = 14
-            val whiteKeyWidth = totalWidth / numWhiteKeys
+            val whiteKeyWidthPx = totalWidthPx / numWhiteKeys
+            val blackKeyWidthPx = whiteKeyWidthPx * 0.6f
+            val blackKeyHeightPx = totalHeightPx * 0.58f
 
-            // 14 White Keys
-            Row(modifier = Modifier.fillMaxSize()) {
-                val notes = listOf("C", "D", "E", "F", "G", "A", "B")
-                val semitones = listOf(0, 2, 4, 5, 7, 9, 11)
-
-                for (octaveOffset in 0..1) {
-                    notes.forEachIndexed { index, name ->
-                        val octave = baseOctave + octaveOffset
-                        val semitone = semitones[index]
-
-                        WhiteKey(
-                            name = name,
-                            octave = octave,
-                            semitone = semitone,
-                            onPlayNote = ::playNote,
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-                }
+            val blackKeys = remember {
+                listOf(
+                    BlackKeyInfo(0, 1, "C#"), BlackKeyInfo(1, 3, "D#"),
+                    BlackKeyInfo(3, 6, "F#"), BlackKeyInfo(4, 8, "G#"), BlackKeyInfo(5, 10, "A#"),
+                    BlackKeyInfo(7, 1, "C#"), BlackKeyInfo(8, 3, "D#"),
+                    BlackKeyInfo(10, 6, "F#"), BlackKeyInfo(11, 8, "G#"), BlackKeyInfo(12, 10, "A#")
+                )
             }
 
-            // 10 Black Keys
-            val blackKeyWidth = whiteKeyWidth * 0.6f
-            val blackKeyPositions = listOf(
-                Triple(0, 1, "C#"), Triple(1, 3, "D#"),
-                Triple(3, 6, "F#"), Triple(4, 8, "G#"), Triple(5, 10, "A#"),
-                Triple(7, 1, "C#"), Triple(8, 3, "D#"),
-                Triple(10, 6, "F#"), Triple(11, 8, "G#"), Triple(12, 10, "A#")
-            )
+            // Function to map any (X, Y) touch point to a specific MIDI Note
+            fun resolveMidiNoteAt(offset: Offset): Int? {
+                val x = offset.x
+                val y = offset.y
 
-            blackKeyPositions.forEach { (whiteIndex, semitone, _) ->
+                if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
+
+                // Check Black Keys First (Top Overlay)
+                if (y <= blackKeyHeightPx) {
+                    blackKeys.forEach { bk ->
+                        val left = (whiteKeyWidthPx * (bk.whiteIndex + 1)) - (blackKeyWidthPx / 2f)
+                        val right = left + blackKeyWidthPx
+                        if (x in left..right) {
+                            val octave = baseOctave + (if (bk.whiteIndex >= 7) 1 else 0)
+                            return (octave + 1) * 12 + bk.semitone
+                        }
+                    }
+                }
+
+                // Fallback to White Keys
+                val whiteIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, 13)
+                val whiteSemitones = listOf(0, 2, 4, 5, 7, 9, 11)
                 val octave = baseOctave + (if (whiteIndex >= 7) 1 else 0)
-                val xOffset = (whiteKeyWidth * (whiteIndex + 1)) - (blackKeyWidth / 2)
+                val semitone = whiteSemitones[whiteIndex % 7]
 
-                BlackKey(
-                    octave = octave,
-                    semitone = semitone,
-                    onPlayNote = ::playNote,
-                    modifier = Modifier
-                        .width(blackKeyWidth)
-                        .fillMaxHeight(0.58f)
-                        .offset(x = xOffset)
-                )
+                return (octave + 1) * 12 + semitone
+            }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(baseOctave, chordMode) {
+                        awaitEachGesture {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val pressedPointers = event.changes.filter { it.pressed }
+
+                                val currentTouchedNotes = mutableSetOf<Int>()
+                                pressedPointers.forEach { pointer ->
+                                    resolveMidiNoteAt(pointer.position)?.let { note ->
+                                        currentTouchedNotes.add(note)
+                                    }
+                                }
+
+                                updateActiveNotes(currentTouchedNotes)
+                            }
+                        }
+                    }
+            ) {
+                // Visual Rendering: 14 White Keys
+                Row(modifier = Modifier.fillMaxSize()) {
+                    val names = listOf("C", "D", "E", "F", "G", "A", "B")
+                    val semitones = listOf(0, 2, 4, 5, 7, 9, 11)
+
+                    for (octaveOffset in 0..1) {
+                        names.forEachIndexed { index, name ->
+                            val octave = baseOctave + octaveOffset
+                            val semitone = semitones[index]
+                            val midiNote = (octave + 1) * 12 + semitone
+
+                            WhiteKeyVisual(
+                                name = name,
+                                octave = octave,
+                                isPressed = activeMidiNotes.contains(midiNote),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                }
+
+                // Visual Rendering: 10 Black Keys
+                val density = LocalContext.current.resources.displayMetrics.density
+                blackKeys.forEach { bk ->
+                    val octave = baseOctave + (if (bk.whiteIndex >= 7) 1 else 0)
+                    val midiNote = (octave + 1) * 12 + bk.semitone
+
+                    val xOffsetDp = ((whiteKeyWidthPx * (bk.whiteIndex + 1)) - (blackKeyWidthPx / 2f)) / density
+                    val widthDp = blackKeyWidthPx / density
+
+                    BlackKeyVisual(
+                        isPressed = activeMidiNotes.contains(midiNote),
+                        modifier = Modifier
+                            .width(widthDp.dp)
+                            .fillMaxHeight(0.58f)
+                            .offset(x = xOffsetDp.dp)
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-fun WhiteKey(
+fun ControlChip(
+    text: String,
+    isActive: Boolean,
+    activeColor: Color,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isActive) activeColor else Color(0xFF333333))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            color = if (isActive) Color.Black else Color.White,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold
+        )
+    }
+}
+
+@Composable
+fun WhiteKeyVisual(
     name: String,
     octave: Int,
-    semitone: Int,
-    onPlayNote: (Int, Int) -> Unit,
+    isPressed: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var isPressed by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .fillMaxHeight()
             .padding(horizontal = 1.dp)
             .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
-            .background(if (isPressed) Color(0xFFDCDCDC) else Color.White)
-            .pointerInput(octave, semitone) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onPlayNote(octave, semitone)
-                        tryAwaitRelease()
-                        isPressed = false
-                    }
-                )
-            },
+            .background(if (isPressed) Color(0xFFCCCCCC) else Color.White),
         contentAlignment = Alignment.BottomCenter
     ) {
         Text(
             text = "$name$octave",
             color = Color.DarkGray,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             modifier = Modifier.padding(bottom = 8.dp)
         )
     }
 }
 
 @Composable
-fun BlackKey(
-    octave: Int,
-    semitone: Int,
-    onPlayNote: (Int, Int) -> Unit,
+fun BlackKeyVisual(
+    isPressed: Boolean,
     modifier: Modifier = Modifier
 ) {
-    var isPressed by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp))
             .background(if (isPressed) Color(0xFFFFB300) else Color(0xFF151515))
-            .pointerInput(octave, semitone) {
-                detectTapGestures(
-                    onPress = {
-                        isPressed = true
-                        onPlayNote(octave, semitone)
-                        tryAwaitRelease()
-                        isPressed = false
-                    }
-                )
-            }
     )
 }
