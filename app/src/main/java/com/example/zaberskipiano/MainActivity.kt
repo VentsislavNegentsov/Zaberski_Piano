@@ -52,7 +52,6 @@ class MainActivity : ComponentActivity() {
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val insetsController = WindowInsetsControllerCompat(window, window.decorView)
-        // Hide both status bar and navigation bars (square, triangle, circle) to prevent UI overlap
         insetsController.hide(WindowInsetsCompat.Type.systemBars())
         insetsController.systemBarsBehavior =
             WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
@@ -75,16 +74,22 @@ fun PianoScreen() {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
 
-    // 49 total white keys across 7 octaves (C1 to B7).
-    // Viewport displays 14 white keys at once.
-    // firstWhiteKeyIndex = 21 corresponds to starting at C4 (Octave 4).
     var firstWhiteKeyIndex by remember { mutableIntStateOf(21) }
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
-    var sustainMode by remember { mutableStateOf(SustainMode.NONE) }
+    var sustainMode by remember { mutableStateOf(SustainMode.HALF) } // Set Sustain 1/2 active by default
     var dynamicEnabled by remember { mutableStateOf(false) }
+    var isKeySizeEnlarged by remember { mutableStateOf(false) }
+    var noLabels by remember { mutableStateOf(true) } // Set "No Labels" active by default
     var navLocked by remember { mutableStateOf(false) }
+    var showCreditsDialog by remember { mutableStateOf(false) }
 
-    // Sensor readings & Peak Hold logic (100ms decay)
+    val numVisibleWhiteKeys = if (isKeySizeEnlarged) 9 else 14
+    val maxFirstIndex = 49 - numVisibleWhiteKeys
+
+    LaunchedEffect(isKeySizeEnlarged) {
+        firstWhiteKeyIndex = firstWhiteKeyIndex.coerceIn(0, maxFirstIndex)
+    }
+
     var liveShakeMagnitude by remember { mutableFloatStateOf(0f) }
     var maxShakeMagnitude by remember { mutableFloatStateOf(0f) }
     var maxResetJob by remember { mutableStateOf<Job?>(null) }
@@ -115,7 +120,6 @@ fun PianoScreen() {
         context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
     }
 
-    // Dynamic volume scaling with max acceleration at 0.1f
     fun getDynamicVolume(magnitude: Float): Float {
         val normalized = (magnitude / 0.1f).coerceIn(0f, 1f)
         return (0.15f + normalized * 0.85f).coerceIn(0.15f, 1.0f)
@@ -259,7 +263,6 @@ fun PianoScreen() {
         directPressedNotes.addAll(newDirectNotes)
     }
 
-    // Helper functions for dynamic single-key index math
     val whiteSemitoneOffsets = listOf(0, 2, 4, 5, 7, 9, 11)
     val whiteNoteNames = listOf("C", "D", "E", "F", "G", "A", "B")
 
@@ -267,6 +270,55 @@ fun PianoScreen() {
         val octave = (globalWhiteKeyIndex / 7) + 1
         val semitone = whiteSemitoneOffsets[globalWhiteKeyIndex % 7]
         return (octave + 1) * 12 + semitone
+    }
+
+    // --- CREDITS DIALOG ---
+    if (showCreditsDialog) {
+        AlertDialog(
+            onDismissRequest = { showCreditsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "Zaberski Piano",
+                        color = amberColor,
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "v1.3",
+                        color = amberColor.copy(alpha = 0.8f),
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            },
+            text = {
+                Column {
+                    Text(
+                        text = "by Ventsislav Negentsov",
+                        color = Color.White,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Normal
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "\ndedicated to Zaberski father & son",
+                        color = amberColor.copy(alpha = 0.85f),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Light
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCreditsDialog = false }) {
+                    Text("Close", color = amberColor, fontWeight = FontWeight.Bold)
+                }
+            },
+            containerColor = Color(0xFF2A2A2A),
+            titleContentColor = Color.White,
+            textContentColor = Color.White
+        )
     }
 
     Column(
@@ -285,48 +337,33 @@ fun PianoScreen() {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Title Header
-            Box(
-                modifier = Modifier
-                    .border(width = 1.5.dp, color = amberColor, shape = RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 4.dp)
-            ) {
-                Column {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "Zaberski Piano",
-                            color = amberColor,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "v1.3",
-                            color = amberColor.copy(alpha = 0.8f),
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                    Text(
-                        text = "by Ventsislav Negentsov",
-                        color = Color.LightGray,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Normal
-                    )
-                    Text(
-                        text = "dedicated to Zaberski father & son",
-                        color = amberColor.copy(alpha = 0.8f),
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Light
-                    )
-                }
-            }
+            // Credits Button
+            ControlChip(
+                text = "Credits",
+                isActive = showCreditsDialog,
+                activeColor = amberColor,
+                onClick = { showCreditsDialog = true }
+            )
 
             // Controls
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                ControlChip(
+                    text = "No Labels",
+                    isActive = noLabels,
+                    activeColor = Color(0xFFE91E63),
+                    onClick = { noLabels = !noLabels }
+                )
+
+                ControlChip(
+                    text = "Key +50%",
+                    isActive = isKeySizeEnlarged,
+                    activeColor = Color(0xFFFF9800),
+                    onClick = { isKeySizeEnlarged = !isKeySizeEnlarged }
+                )
+
                 ControlChip(
                     text = "Dynamic",
                     isActive = dynamicEnabled,
@@ -376,7 +413,7 @@ fun PianoScreen() {
 
         Spacer(modifier = Modifier.height(2.dp))
 
-        // --- MAIN PIANO KEYBOARD WITH SINGLE KEY SCROLLING SUPPORT ---
+        // --- MAIN PIANO KEYBOARD ---
         BoxWithConstraints(
             modifier = Modifier
                 .fillMaxWidth()
@@ -387,7 +424,6 @@ fun PianoScreen() {
             val totalWidthPx = constraints.maxWidth.toFloat()
             val totalHeightPx = constraints.maxHeight.toFloat()
 
-            val numVisibleWhiteKeys = 14
             val whiteKeyWidthPx = totalWidthPx / numVisibleWhiteKeys
             val blackKeyWidthPx = whiteKeyWidthPx * 0.6f
             val blackKeyHeightPx = totalHeightPx * 0.58f
@@ -398,7 +434,6 @@ fun PianoScreen() {
 
                 if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
 
-                // Check black keys first (only indices 0, 1, 3, 4, 5 in octave have black key to their right)
                 if (y <= blackKeyHeightPx) {
                     for (i in 0 until numVisibleWhiteKeys) {
                         val globalIndex = firstWhiteKeyIndex + i
@@ -413,7 +448,6 @@ fun PianoScreen() {
                     }
                 }
 
-                // Check white keys
                 val keyRelativeIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, numVisibleWhiteKeys - 1)
                 return getMidiForWhiteKey(firstWhiteKeyIndex + keyRelativeIndex)
             }
@@ -421,7 +455,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(firstWhiteKeyIndex, chordMode, dynamicEnabled, sustainMode) {
+                    .pointerInput(firstWhiteKeyIndex, chordMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
@@ -453,13 +487,14 @@ fun PianoScreen() {
                         WhiteKeyVisual(
                             name = name,
                             octave = octave,
+                            showLabel = !noLabels,
                             isPressed = activeMidiNotes.contains(midiNote),
                             modifier = Modifier.weight(1f)
                         )
                     }
                 }
 
-                // Render Black Keys dynamically aligned to visible white keys
+                // Render Black Keys dynamically aligned
                 val density = LocalContext.current.resources.displayMetrics.density
                 for (i in 0 until numVisibleWhiteKeys) {
                     val globalIndex = firstWhiteKeyIndex + i
@@ -484,19 +519,19 @@ fun PianoScreen() {
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // --- BOTTOM NAVIGATION & MINI-MAP OVERVIEW WITH SMOOTH SINGLE-KEY SCROLLING ---
+        // --- BOTTOM NAVIGATION & MINI-MAP OVERVIEW ---
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(38.dp)
+                .height(26.dp)
                 .background(Color(0xFF151515), RoundedCornerShape(6.dp))
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Lock Button (Left)
+            // Lock Button
             Box(
                 modifier = Modifier
-                    .size(30.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
                     .background(if (navLocked) amberColor else Color(0xFF2A2A2A))
                     .clickable { navLocked = !navLocked },
@@ -504,38 +539,37 @@ fun PianoScreen() {
             ) {
                 Text(
                     text = if (navLocked) "🔒" else "🔓",
-                    fontSize = 13.sp
+                    fontSize = 10.sp
                 )
             }
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Mini Keyboard Strip with Drag & Tap for Smooth Key Scrolling
+            // Mini Keyboard Strip
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight()
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color(0xFF222222))
-                    .pointerInput(navLocked) {
+                    .pointerInput(navLocked, numVisibleWhiteKeys) {
                         if (!navLocked) {
                             detectTapGestures { offset ->
                                 val totalMiniWhiteKeys = 49f
                                 val keyWidth = size.width / totalMiniWhiteKeys
                                 val tappedIndex = (offset.x / keyWidth).toInt()
-                                // Center the 14-key view around the tapped position
-                                firstWhiteKeyIndex = (tappedIndex - 7).coerceIn(0, 35)
+                                firstWhiteKeyIndex = (tappedIndex - (numVisibleWhiteKeys / 2)).coerceIn(0, maxFirstIndex)
                             }
                         }
                     }
-                    .pointerInput(navLocked) {
+                    .pointerInput(navLocked, numVisibleWhiteKeys) {
                         if (!navLocked) {
                             detectDragGestures { change, _ ->
                                 change.consume()
                                 val totalMiniWhiteKeys = 49f
                                 val keyWidth = size.width / totalMiniWhiteKeys
                                 val draggedIndex = (change.position.x / keyWidth).toInt()
-                                firstWhiteKeyIndex = (draggedIndex - 7).coerceIn(0, 35)
+                                firstWhiteKeyIndex = (draggedIndex - (numVisibleWhiteKeys / 2)).coerceIn(0, maxFirstIndex)
                             }
                         }
                     }
@@ -549,11 +583,10 @@ fun PianoScreen() {
                     val miniBlackHeight = size.height * 0.55f
 
                     val startVisibleWhite = firstWhiteKeyIndex
-                    val visibleWhiteCount = 14
 
                     // Render mini white keys
                     for (i in 0 until totalWhiteKeys) {
-                        val isVisibleRegion = i >= startVisibleWhite && i < (startVisibleWhite + visibleWhiteCount)
+                        val isVisibleRegion = i >= startVisibleWhite && i < (startVisibleWhite + numVisibleWhiteKeys)
                         val keyColor = if (isVisibleRegion) Color(0xFFE0E0E0) else Color(0xFF555555)
 
                         drawRect(
@@ -568,7 +601,7 @@ fun PianoScreen() {
                     for (oct in 0 until totalOctaves) {
                         blackPattern.forEach { indexInOctave ->
                             val whiteIndex = oct * 7 + indexInOctave
-                            val isVisibleRegion = whiteIndex >= startVisibleWhite && whiteIndex < (startVisibleWhite + visibleWhiteCount)
+                            val isVisibleRegion = whiteIndex >= startVisibleWhite && whiteIndex < (startVisibleWhite + numVisibleWhiteKeys)
                             val blackColor = if (isVisibleRegion) Color.Black else Color(0xFF2A2A2A)
 
                             val xPos = ((whiteIndex + 1) * miniKeyWidth) - (miniBlackWidth / 2f)
@@ -582,7 +615,7 @@ fun PianoScreen() {
 
                     // Highlight Active Viewport Frame
                     val highlightLeft = startVisibleWhite * miniKeyWidth
-                    val highlightWidth = visibleWhiteCount * miniKeyWidth
+                    val highlightWidth = numVisibleWhiteKeys * miniKeyWidth
                     drawRect(
                         color = Color(0xFFFFB300).copy(alpha = 0.35f),
                         topLeft = Offset(highlightLeft, 0f),
@@ -593,11 +626,11 @@ fun PianoScreen() {
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // (-) and (+) Single White Key Scroll Controls
+            // (-) and (+) Scroll Controls
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .size(22.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF2A2A2A))
                         .clickable(enabled = !navLocked && firstWhiteKeyIndex > 0) {
@@ -608,25 +641,25 @@ fun PianoScreen() {
                     Text(
                         text = "−",
                         color = if (firstWhiteKeyIndex > 0) amberColor else Color.Gray,
-                        fontSize = 18.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
 
                 Box(
                     modifier = Modifier
-                        .size(30.dp)
+                        .size(22.dp)
                         .clip(CircleShape)
                         .background(Color(0xFF2A2A2A))
-                        .clickable(enabled = !navLocked && firstWhiteKeyIndex < 35) {
-                            firstWhiteKeyIndex = (firstWhiteKeyIndex + 1).coerceAtMost(35)
+                        .clickable(enabled = !navLocked && firstWhiteKeyIndex < maxFirstIndex) {
+                            firstWhiteKeyIndex = (firstWhiteKeyIndex + 1).coerceAtMost(maxFirstIndex)
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = "+",
-                        color = if (firstWhiteKeyIndex < 35) amberColor else Color.Gray,
-                        fontSize = 18.sp,
+                        color = if (firstWhiteKeyIndex < maxFirstIndex) amberColor else Color.Gray,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -663,6 +696,7 @@ fun ControlChip(
 fun WhiteKeyVisual(
     name: String,
     octave: Int,
+    showLabel: Boolean,
     isPressed: Boolean,
     modifier: Modifier = Modifier
 ) {
@@ -674,12 +708,14 @@ fun WhiteKeyVisual(
             .background(if (isPressed) Color(0xFFCCCCCC) else Color.White),
         contentAlignment = Alignment.BottomCenter
     ) {
-        Text(
-            text = "$name$octave",
-            color = Color.DarkGray,
-            fontSize = 11.sp,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
+        if (showLabel) {
+            Text(
+                text = "$name$octave",
+                color = Color.DarkGray,
+                fontSize = 11.sp,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
     }
 }
 
