@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -100,6 +101,7 @@ fun PianoScreen() {
     var blackKeysEasyHit by remember { mutableStateOf(true) }
     var navLocked by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
+    var creditsLanguage by remember { mutableStateOf("BG") }
 
     val numVisibleWhiteKeys = if (isKeySizeEnlarged) 9 else 14
     val maxFirstIndex = 49 - numVisibleWhiteKeys
@@ -335,25 +337,151 @@ fun PianoScreen() {
                 }
             },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 350.dp)
+                        .verticalScroll(rememberScrollState())
+                ) {
                     Text(
-                        text = "by Ventsislav Negentsov",
+                        text = if (creditsLanguage == "BG") "от Венцислав Негенцов" else "by Ventsislav Negentsov",
                         color = Color.White,
                         fontSize = 15.sp,
-                        fontWeight = FontWeight.Normal
+                        fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(6.dp))
+                    Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = "\ndedicated to Zaberski father & son",
+                        text = if (creditsLanguage == "BG") "Посвещава се на баща и син Заберски" else "Dedicated to Zaberski father & son",
                         color = amberColor.copy(alpha = 0.85f),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.Light
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.Gray.copy(alpha = 0.3f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    if (creditsLanguage == "BG") {
+                        // --- ФАЙТЪР: БАЩА (BG) ---
+                        Text(
+                            text = "Ангел Заберски – баща (1936–2011)",
+                            color = amberColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Ангел Заберски – баща (1936–2011) е изтъкнат български композитор, аранжор и музикален педагог, считан за една от ключовите фигури в изграждането на българската забавна и естрадна музика.\n\n" +
+                                    "• Произход и образование: Роден е на 8 февруари 1936 г. Завършва Държавната музикална академия в София със специалност оперно пеене в класа на проф. Христо Бръмбаров.\n\n" +
+                                    "• Професионален път: Работи дълги години като музикален редактор и аранжор в Българското национално радио, където създава и обработва стотици произведения за оркестри и популярни изпълнители.\n\n" +
+                                    "• Емблематични композиции: Автор е на някои от най-големите класики в българската музика. Неговата песен „Калиакра“ (в изпълнение на Лили Иванова) печели първа награда на фестивала „Златният Орфей“ през 1966 г. Създава още поп класики като „Лилей“, „Бяла песен“, както и редица хитове за Маргарет Николова, Йорданка Христова, Бисер Киров и Орлин Горанов.\n\n" +
+                                    "• Педагогическо наследство: Като дългогодишен преподавател подготвя поколения български поп и джаз пеещи таланти, предавайки им високи академични стандарти за вокална техника.\n\n" +
+                                    "• Музикално семейство: Баща е на джаз пианиста и композитор Ангел Заберски-син и на певицата Неда Заберска, които продължават творческия род.",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+
+                        // --- 3 ПРАЗНИ РЕДА ---
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        // --- СИН (BG) ---
+                        Text(
+                            text = "Ангел Заберски – син (род. 1973 г.)",
+                            color = amberColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Ангел Заберски – син (род. 1973 г.) е сред най-изявените съвременни български джаз пианисти, композитори, аранжори и музикални педагози.\n\n" +
+                                    "• Произход и образование: Роден е на 1 февруари 1973 г. в София в музикалното семейство на композитора Ангел Заберски-баща и певицата Маргарита Радинска. Завършва Националното музикално училище „Любомир Пипков“ и Националната музикална академия „Проф. Панчо Владигеров“ със специалност композиция.\n\n" +
+                                    "• Творческа кариера: Известен е с виртуозните си изпълнения и майсторското съчетаване на класическа музика с джаз елементи. Автор е на десетки пиеси за джаз трио, биг бенд, симфоничен оркестър и камерни състави.\n\n" +
+                                    "• Значими проекти: Основател е на формации като „Ангел Заберски Биг Бенд“ и „Angel Zaberski Trio“. Сред най-успешните му авторски концерти и албуми са поредиците „Back to Classics“, „Symphony Jazz“ и „Jazz Standards“.\n\n" +
+                                    "• Педагогическа дейност: Преподава джаз импровизация, пиано и аранжиране в Нов български университет, където е хабилитиран доцент.\n\n" +
+                                    "• Отличия: Носител е на редица престижни награди за принос към българската култура и изкуство, сред които „Кристална лира“ и „Златно перо“.",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    } else {
+                        // --- FATHER (ENG) ---
+                        Text(
+                            text = "Angel Zaberski - Father (1936–2011)",
+                            color = amberColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Angel Zaberski - Father (1936–2011) was a prominent Bulgarian composer, arranger, and music educator, considered a key figure in Bulgarian pop music.\n\n" +
+                                    "• Origin & Education: Born Feb 8, 1936. Graduated from the National Academy of Music in Opera Singing under Prof. Hristo Hristov.\n\n" +
+                                    "• Career: Worked for many years as a music editor and arranger at Bulgarian National Radio.\n\n" +
+                                    "• Iconic Works: Composed classic hits including 'Kaliakra' (1st prize at Golden Orpheus 1966), 'Liley', and 'Byala Pesen'.\n\n" +
+                                    "• Legacy: Trained generations of Bulgarian pop and jazz singers.\n\n" +
+                                    "• Musical Family: Father of jazz pianist Angel Zaberski Jr. and singer Neda Zaberska.",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+
+                        // --- 3 BLANK LINES ---
+                        Spacer(modifier = Modifier.height(28.dp))
+
+                        // --- SON (ENG) ---
+                        Text(
+                            text = "Angel Zaberski - Son (b. 1973)",
+                            color = amberColor,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Angel Zaberski - Son (b. 1973) is among the most prominent contemporary Bulgarian jazz pianists, composers, arrangers, and music educators.\n\n" +
+                                    "• Origin & Education: Born Feb 1, 1973, in Sofia to composer Angel Zaberski Sr. and singer Margarita Radinska. Graduated from Lubomir Pipkov National School of Music and Pancho Vladigerov National Academy of Music.\n\n" +
+                                    "• Artistic Career: Renowned for virtuous performances blending classical music with jazz elements. Composed works for jazz trio, big band, and symphony orchestra.\n\n" +
+                                    "• Major Projects: Founder of 'Angel Zaberski Big Band' and 'Angel Zaberski Trio'. Creator of acclaimed series 'Back to Classics', 'Symphony Jazz', and 'Jazz Standards'.\n\n" +
+                                    "• Teaching: Teaches jazz improvisation, piano, and arranging at New Bulgarian University as an Associate Professor.\n\n" +
+                                    "• Awards: Recipient of prestigious Bulgarian cultural honors including 'Crystal Lyre' and 'Golden Feather'.",
+                            color = Color.White.copy(alpha = 0.9f),
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp
+                        )
+                    }
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showCreditsDialog = false }) {
-                    Text("Close", color = amberColor, fontWeight = FontWeight.Bold)
+                Row(
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Button to toggle language
+                    OutlinedButton(
+                        onClick = {
+                            creditsLanguage = if (creditsLanguage == "BG") "ENG" else "BG"
+                        },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = amberColor),
+                        modifier = Modifier.padding(end = 8.dp)
+                    ) {
+                        Text(
+                            text = if (creditsLanguage == "BG") "ENG" else "BG",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    TextButton(onClick = { showCreditsDialog = false }) {
+                        Text(
+                            text = if (creditsLanguage == "BG") "Затвори" else "Close",
+                            color = amberColor,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
                 }
             },
             containerColor = Color(0xFF2A2A2A),
