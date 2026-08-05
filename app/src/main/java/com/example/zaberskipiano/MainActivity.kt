@@ -40,6 +40,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
 
@@ -76,10 +77,11 @@ fun PianoScreen() {
 
     var firstWhiteKeyIndex by remember { mutableIntStateOf(21) }
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
-    var sustainMode by remember { mutableStateOf(SustainMode.HALF) } // Set Sustain 1/2 active by default
+    var sustainMode by remember { mutableStateOf(SustainMode.HALF) }
     var dynamicEnabled by remember { mutableStateOf(false) }
     var isKeySizeEnlarged by remember { mutableStateOf(false) }
-    var noLabels by remember { mutableStateOf(true) } // Set "No Labels" active by default
+    var noLabels by remember { mutableStateOf(true) }
+    var blackKeysEasyHit by remember { mutableStateOf(true) }
     var navLocked by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
 
@@ -179,7 +181,7 @@ fun PianoScreen() {
 
     fun playMidiNote(midiNote: Int, velocity: Float = 1.0f): Int {
         val anchors = listOf(36, 48, 60, 72, 84, 96)
-        val baseMidi = anchors.minByOrNull { kotlin.math.abs(it - midiNote) } ?: 60
+        val baseMidi = anchors.minByOrNull { abs(it - midiNote) } ?: 60
 
         val soundId = soundMap[baseMidi] ?: 0
         if (soundId == 0) return 0
@@ -351,23 +353,30 @@ fun PianoScreen() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 ControlChip(
+                    text = "Black Keys Precision",
+                    isActive = blackKeysEasyHit,
+                    activeColor = amberColor,
+                    onClick = { blackKeysEasyHit = !blackKeysEasyHit }
+                )
+
+                ControlChip(
                     text = "No Labels",
                     isActive = noLabels,
-                    activeColor = Color(0xFFE91E63),
+                    activeColor = amberColor,
                     onClick = { noLabels = !noLabels }
                 )
 
                 ControlChip(
-                    text = "Key +50%",
+                    text = "Large Keyboard",
                     isActive = isKeySizeEnlarged,
-                    activeColor = Color(0xFFFF9800),
+                    activeColor = amberColor,
                     onClick = { isKeySizeEnlarged = !isKeySizeEnlarged }
                 )
 
                 ControlChip(
                     text = "Dynamic",
                     isActive = dynamicEnabled,
-                    activeColor = Color(0xFF2196F3),
+                    activeColor = amberColor,
                     onClick = { dynamicEnabled = !dynamicEnabled }
                 )
 
@@ -394,7 +403,7 @@ fun PianoScreen() {
                 ControlChip(
                     text = "Sustain 1/2",
                     isActive = sustainMode == SustainMode.HALF,
-                    activeColor = Color(0xFF81C784),
+                    activeColor = amberColor,
                     onClick = {
                         sustainMode = if (sustainMode == SustainMode.HALF) SustainMode.NONE else SustainMode.HALF
                     }
@@ -403,7 +412,7 @@ fun PianoScreen() {
                 ControlChip(
                     text = "Sustain",
                     isActive = sustainMode == SustainMode.FULL,
-                    activeColor = Color(0xFF4CAF50),
+                    activeColor = amberColor,
                     onClick = {
                         sustainMode = if (sustainMode == SustainMode.FULL) SustainMode.NONE else SustainMode.FULL
                     }
@@ -434,20 +443,43 @@ fun PianoScreen() {
 
                 if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
 
+                // Upper region touching black keys area
                 if (y <= blackKeyHeightPx) {
-                    for (i in 0 until numVisibleWhiteKeys) {
-                        val globalIndex = firstWhiteKeyIndex + i
-                        val noteInOctave = globalIndex % 7
-                        if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
-                            val left = (whiteKeyWidthPx * (i + 1)) - (blackKeyWidthPx / 2f)
-                            val right = left + blackKeyWidthPx
-                            if (x in left..right) {
-                                return getMidiForWhiteKey(globalIndex) + 1
+                    if (blackKeysEasyHit) {
+                        // Easy hit ON: Snap to the closest black key on the X-axis
+                        var closestBlackNote: Int? = null
+                        var minDistance = Float.MAX_VALUE
+
+                        for (i in 0 until numVisibleWhiteKeys) {
+                            val globalIndex = firstWhiteKeyIndex + i
+                            val noteInOctave = globalIndex % 7
+                            if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
+                                val blackKeyCenterX = whiteKeyWidthPx * (i + 1)
+                                val distance = abs(x - blackKeyCenterX)
+                                if (distance < minDistance) {
+                                    minDistance = distance
+                                    closestBlackNote = getMidiForWhiteKey(globalIndex) + 1
+                                }
+                            }
+                        }
+                        return closestBlackNote
+                    } else {
+                        // Easy hit OFF: Only trigger black key if touch is directly on its visual bounds
+                        for (i in 0 until numVisibleWhiteKeys) {
+                            val globalIndex = firstWhiteKeyIndex + i
+                            val noteInOctave = globalIndex % 7
+                            if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
+                                val left = (whiteKeyWidthPx * (i + 1)) - (blackKeyWidthPx / 2f)
+                                val right = left + blackKeyWidthPx
+                                if (x in left..right) {
+                                    return getMidiForWhiteKey(globalIndex) + 1
+                                }
                             }
                         }
                     }
                 }
 
+                // Lower region OR missed black key when Easy Hit is disabled -> fall through to white keys
                 val keyRelativeIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, numVisibleWhiteKeys - 1)
                 return getMidiForWhiteKey(firstWhiteKeyIndex + keyRelativeIndex)
             }
@@ -455,7 +487,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(firstWhiteKeyIndex, chordMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys) {
+                    .pointerInput(firstWhiteKeyIndex, chordMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
