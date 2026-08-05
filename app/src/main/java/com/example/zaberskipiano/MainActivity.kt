@@ -2,6 +2,7 @@ package com.example.zaberskipiano
 
 import android.app.Activity
 import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -43,6 +44,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -340,6 +342,11 @@ fun PianoScreen() {
         return (octave + 1) * 12 + semitone
     }
 
+    fun openUrl(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        context.startActivity(intent)
+    }
+
     // --- CREDITS DIALOG ---
     if (showCreditsDialog) {
         AlertDialog(
@@ -352,7 +359,7 @@ fun PianoScreen() {
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = "Zaberski Piano v1.3",
+                        text = "Zaberski Piano v1.4",
                         color = amberColor,
                         fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
@@ -642,6 +649,50 @@ fun PianoScreen() {
                             )
                         }
                     }
+
+                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ И ЛИНКОВЕ НАЙ-ДОЛУ ---
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.Gray.copy(alpha = 0.4f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = if (creditsLanguage == "BG") "Официални източници:" else "Official Links:",
+                        color = amberColor,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Text(
+                        text = "• " + (if (creditsLanguage == "BG") "Официален сайт (Биография)" else "Official Website (Biography)"),
+                        color = Color(0xFF64B5F6),
+                        fontSize = 12.sp,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openUrl("https://www.angelzaberski.com/bg/biography.html")
+                            }
+                            .padding(vertical = 3.dp)
+                    )
+
+                    Text(
+                        text = "• " + (if (creditsLanguage == "BG") "Профил в Нов български университет" else "New Bulgarian University Profile"),
+                        color = Color(0xFF64B5F6),
+                        fontSize = 12.sp,
+                        textDecoration = TextDecoration.Underline,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable {
+                                openUrl("https://music.nbu.bg/bg/teachers/doc-d-r-angel-zaberski-1329")
+                            }
+                            .padding(vertical = 3.dp)
+                    )
                 }
             },
             confirmButton = {
@@ -1084,7 +1135,7 @@ fun PianoScreen() {
         }
     }
 
-    // --- FULLSCREEN MEDIA OVERLAY (Изведен в Dialog за да е НАД ВСИЧКО) ---
+    // --- FULLSCREEN MEDIA OVERLAY ---
     activeFullscreenMedia?.let { media ->
         Dialog(
             onDismissRequest = { activeFullscreenMedia = null },
