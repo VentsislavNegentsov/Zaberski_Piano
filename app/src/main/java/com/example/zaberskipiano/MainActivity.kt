@@ -1,5 +1,6 @@
 package com.example.zaberskipiano
 
+import android.app.Activity
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -59,6 +60,8 @@ enum class HarmonyMode(val displayName: String) {
 
 enum class SustainMode { NONE, HALF, FULL }
 
+enum class KeyPressedState { NONE, DIRECT, HARMONY }
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -89,6 +92,7 @@ fun PianoScreen() {
 
     var firstWhiteKeyIndex by remember { mutableIntStateOf(21) }
     var harmonyMode by remember { mutableStateOf(HarmonyMode.NONE) }
+    var bassLineEnabled by remember { mutableStateOf(false) }
     var sustainMode by remember { mutableStateOf(SustainMode.HALF) }
     var dynamicEnabled by remember { mutableStateOf(false) }
     var isKeySizeEnlarged by remember { mutableStateOf(false) }
@@ -123,7 +127,7 @@ fun PianoScreen() {
             .build()
 
         SoundPool.Builder()
-            .setMaxStreams(32) // Upgraded max audio streams to support rich, multi-note polyphonic voicings
+            .setMaxStreams(32)
             .setAudioAttributes(attributes)
             .build()
     }
@@ -205,7 +209,22 @@ fun PianoScreen() {
     }
 
     fun getHarmonyMidiNotes(rootMidi: Int): List<Int> {
-        return when (harmonyMode) {
+        val bassNotes = if (bassLineEnabled) {
+            val bassRoot = (rootMidi - 12).coerceAtLeast(24)
+            when (harmonyMode) {
+                HarmonyMode.NONE -> listOf(bassRoot, bassRoot + 12)
+                HarmonyMode.MAJOR -> listOf(bassRoot, bassRoot + 7, bassRoot + 16)
+                HarmonyMode.MINOR -> listOf(bassRoot, bassRoot + 7, bassRoot + 15)
+                HarmonyMode.MAJ7 -> listOf(bassRoot, bassRoot + 7, bassRoot + 16)
+                HarmonyMode.MIN7 -> listOf(bassRoot, bassRoot + 7, bassRoot + 15)
+                HarmonyMode.DOM9 -> listOf(bassRoot, bassRoot + 10, bassRoot + 16)
+                HarmonyMode.QUARTAL -> listOf(bassRoot, bassRoot + 7, bassRoot + 14)
+                HarmonyMode.DIM7 -> listOf(bassRoot, bassRoot + 6, bassRoot + 15)
+                HarmonyMode.LUSH11 -> listOf(bassRoot, bassRoot + 7, bassRoot + 14, bassRoot + 18)
+            }
+        } else emptyList()
+
+        val rightHandNotes = when (harmonyMode) {
             HarmonyMode.NONE -> listOf(rootMidi)
             HarmonyMode.MAJOR -> listOf(rootMidi, rootMidi + 4, rootMidi + 7)
             HarmonyMode.MINOR -> listOf(rootMidi, rootMidi + 3, rootMidi + 7)
@@ -216,6 +235,8 @@ fun PianoScreen() {
             HarmonyMode.DIM7 -> listOf(rootMidi, rootMidi + 3, rootMidi + 6, rootMidi + 9)
             HarmonyMode.LUSH11 -> listOf(rootMidi, rootMidi + 4, rootMidi + 7, rootMidi + 10, rootMidi + 14, rootMidi + 17)
         }
+
+        return bassNotes + rightHandNotes
     }
 
     fun updateActiveNotes(newDirectNotes: Set<Int>) {
@@ -306,7 +327,7 @@ fun PianoScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "v1.4",
+                        text = "v1.3",
                         color = amberColor.copy(alpha = 0.8f),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
@@ -323,7 +344,7 @@ fun PianoScreen() {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "dedicated to Zaberski father & son",
+                        text = "\ndedicated to Zaberski father & son",
                         color = amberColor.copy(alpha = 0.85f),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Light
@@ -374,7 +395,7 @@ fun PianoScreen() {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Dynamic Harmony Preset Cycle Button
+                // Harmony Preset Cycle Button
                 ControlChip(
                     text = "Harmony: ${harmonyMode.displayName}",
                     isActive = harmonyMode != HarmonyMode.NONE,
@@ -382,6 +403,21 @@ fun PianoScreen() {
                     onClick = {
                         val nextOrdinal = (harmonyMode.ordinal + 1) % HarmonyMode.values().size
                         harmonyMode = HarmonyMode.values()[nextOrdinal]
+                        updateActiveNotes(directPressedNotes.toSet())
+                    },
+                    onLongClick = {
+                        harmonyMode = HarmonyMode.NONE
+                        updateActiveNotes(directPressedNotes.toSet())
+                    }
+                )
+
+                // Bass Line Toggle Button
+                ControlChip(
+                    text = "Bass Line",
+                    isActive = bassLineEnabled,
+                    activeColor = amberColor,
+                    onClick = {
+                        bassLineEnabled = !bassLineEnabled
                         updateActiveNotes(directPressedNotes.toSet())
                     }
                 )
@@ -432,6 +468,18 @@ fun PianoScreen() {
                     }
                 )
             }
+
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Break / Exit App Button (TOP RIGHT)
+            ControlChip(
+                text = "Break",
+                isActive = false,
+                activeColor = amberColor,
+                onClick = {
+                    (context as? Activity)?.finish()
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(2.dp))
@@ -457,10 +505,8 @@ fun PianoScreen() {
 
                 if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
 
-                // Upper region touching black keys area
                 if (y <= blackKeyHeightPx) {
                     if (blackKeysEasyHit) {
-                        // Easy hit ON: Snap to the closest black key on the X-axis
                         var closestBlackNote: Int? = null
                         var minDistance = Float.MAX_VALUE
 
@@ -478,7 +524,6 @@ fun PianoScreen() {
                         }
                         return closestBlackNote
                     } else {
-                        // Easy hit OFF: Only trigger black key if touch is directly on its visual bounds
                         for (i in 0 until numVisibleWhiteKeys) {
                             val globalIndex = firstWhiteKeyIndex + i
                             val noteInOctave = globalIndex % 7
@@ -493,7 +538,6 @@ fun PianoScreen() {
                     }
                 }
 
-                // Lower region OR missed black key when Easy Hit is disabled -> fall through to white keys
                 val keyRelativeIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, numVisibleWhiteKeys - 1)
                 return getMidiForWhiteKey(firstWhiteKeyIndex + keyRelativeIndex)
             }
@@ -501,7 +545,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(firstWhiteKeyIndex, harmonyMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
+                    .pointerInput(firstWhiteKeyIndex, harmonyMode, bassLineEnabled, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
@@ -530,11 +574,17 @@ fun PianoScreen() {
                         val octave = (globalIndex / 7) + 1
                         val midiNote = getMidiForWhiteKey(globalIndex)
 
+                        val keyState = when {
+                            directPressedNotes.contains(midiNote) -> KeyPressedState.DIRECT
+                            activeMidiNotes.contains(midiNote) -> KeyPressedState.HARMONY
+                            else -> KeyPressedState.NONE
+                        }
+
                         WhiteKeyVisual(
                             name = name,
                             octave = octave,
                             showLabel = !noLabels,
-                            isPressed = activeMidiNotes.contains(midiNote),
+                            keyState = keyState,
                             modifier = Modifier.weight(1f)
                         )
                     }
@@ -551,8 +601,14 @@ fun PianoScreen() {
                         val xOffsetDp = ((whiteKeyWidthPx * (i + 1)) - (blackKeyWidthPx / 2f)) / density
                         val widthDp = blackKeyWidthPx / density
 
+                        val keyState = when {
+                            directPressedNotes.contains(blackMidiNote) -> KeyPressedState.DIRECT
+                            activeMidiNotes.contains(blackMidiNote) -> KeyPressedState.HARMONY
+                            else -> KeyPressedState.NONE
+                        }
+
                         BlackKeyVisual(
-                            isPressed = activeMidiNotes.contains(blackMidiNote),
+                            keyState = keyState,
                             modifier = Modifier
                                 .width(widthDp.dp)
                                 .fillMaxHeight(0.58f)
@@ -574,7 +630,6 @@ fun PianoScreen() {
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Lock Button
             Box(
                 modifier = Modifier
                     .size(22.dp)
@@ -591,7 +646,6 @@ fun PianoScreen() {
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Mini Keyboard Strip
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -630,7 +684,6 @@ fun PianoScreen() {
 
                     val startVisibleWhite = firstWhiteKeyIndex
 
-                    // Render mini white keys
                     for (i in 0 until totalWhiteKeys) {
                         val isVisibleRegion = i >= startVisibleWhite && i < (startVisibleWhite + numVisibleWhiteKeys)
                         val keyColor = if (isVisibleRegion) Color(0xFFE0E0E0) else Color(0xFF555555)
@@ -642,7 +695,6 @@ fun PianoScreen() {
                         )
                     }
 
-                    // Render mini black keys
                     val blackPattern = listOf(0, 1, 3, 4, 5)
                     for (oct in 0 until totalOctaves) {
                         blackPattern.forEach { indexInOctave ->
@@ -659,7 +711,6 @@ fun PianoScreen() {
                         }
                     }
 
-                    // Highlight Active Viewport Frame
                     val highlightLeft = startVisibleWhite * miniKeyWidth
                     val highlightWidth = numVisibleWhiteKeys * miniKeyWidth
                     drawRect(
@@ -672,7 +723,6 @@ fun PianoScreen() {
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // (-) and (+) Scroll Controls
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(
                     modifier = Modifier
@@ -719,13 +769,19 @@ fun ControlChip(
     text: String,
     isActive: Boolean,
     activeColor: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null
 ) {
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(6.dp))
             .background(if (isActive) activeColor else Color(0xFF333333))
-            .clickable { onClick() }
+            .pointerInput(onClick, onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick?.invoke() }
+                )
+            }
             .padding(horizontal = 8.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -743,22 +799,29 @@ fun WhiteKeyVisual(
     name: String,
     octave: Int,
     showLabel: Boolean,
-    isPressed: Boolean,
+    keyState: KeyPressedState,
     modifier: Modifier = Modifier
 ) {
+    val keyColor = when (keyState) {
+        KeyPressedState.DIRECT -> Color(0xFF808080)   // Direct Finger Touch: Grey
+        KeyPressedState.HARMONY -> Color(0xFFD0D0D0)  // Harmony/Bass Addition: Light Grey
+        KeyPressedState.NONE -> Color.White
+    }
+
     Box(
         modifier = modifier
             .fillMaxHeight()
             .padding(horizontal = 1.dp)
             .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
-            .background(if (isPressed) Color(0xFFCCCCCC) else Color.White),
+            .background(keyColor),
         contentAlignment = Alignment.BottomCenter
     ) {
         if (showLabel) {
             Text(
                 text = "$name$octave",
-                color = Color.DarkGray,
+                color = if (keyState == KeyPressedState.DIRECT) Color.White else Color.DarkGray,
                 fontSize = 11.sp,
+                fontWeight = if (keyState != KeyPressedState.NONE) FontWeight.Bold else FontWeight.Normal,
                 modifier = Modifier.padding(bottom = 8.dp)
             )
         }
@@ -767,12 +830,18 @@ fun WhiteKeyVisual(
 
 @Composable
 fun BlackKeyVisual(
-    isPressed: Boolean,
+    keyState: KeyPressedState,
     modifier: Modifier = Modifier
 ) {
+    val keyColor = when (keyState) {
+        KeyPressedState.DIRECT -> Color(0xFF555555)   // Direct Finger Touch: Dark Grey
+        KeyPressedState.HARMONY -> Color(0xFFAAAAAA)  // Harmony/Bass Addition: Light Grey
+        KeyPressedState.NONE -> Color(0xFF151515)
+    }
+
     Box(
         modifier = modifier
             .clip(RoundedCornerShape(bottomStart = 4.dp, bottomEnd = 4.dp))
-            .background(if (isPressed) Color(0xFFFFB300) else Color(0xFF151515))
+            .background(keyColor)
     )
 }
