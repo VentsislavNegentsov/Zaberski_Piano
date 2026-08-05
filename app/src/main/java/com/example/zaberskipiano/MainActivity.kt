@@ -12,6 +12,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -32,7 +33,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -340,7 +343,7 @@ fun PianoScreen() {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 350.dp)
+                        .heightIn(max = 400.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
@@ -356,6 +359,19 @@ fun PianoScreen() {
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium
                     )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Joint Photo (Father & Son)
+                    Image(
+                        painter = painterResource(id = R.drawable.az_fs),
+                        contentDescription = "Angel Zaberski Father and Son",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(160.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Fit
+                    )
+
                     Spacer(modifier = Modifier.height(12.dp))
                     Box(
                         modifier = Modifier
@@ -366,7 +382,7 @@ fun PianoScreen() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (creditsLanguage == "BG") {
-                        // --- ФАЙТЪР: БАЩА (BG) ---
+                        // --- FATHER (BG) ---
                         Text(
                             text = "Ангел Заберски – баща (1936–2011)",
                             color = amberColor,
@@ -386,10 +402,37 @@ fun PianoScreen() {
                             lineHeight = 18.sp
                         )
 
-                        // --- 3 ПРАЗНИ РЕДА ---
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Father Photos (az_f1 & az_f2)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.az_f1),
+                                contentDescription = "Angel Zaberski Sr. 1",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(130.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_f2),
+                                contentDescription = "Angel Zaberski Sr. 2",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(130.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
+
+                        // --- 3 BLANK LINES ---
                         Spacer(modifier = Modifier.height(28.dp))
 
-                        // --- СИН (BG) ---
+                        // --- SON (BG) ---
                         Text(
                             text = "Ангел Заберски – син (род. 1973 г.)",
                             color = amberColor,
@@ -408,6 +451,42 @@ fun PianoScreen() {
                             fontSize = 13.sp,
                             lineHeight = 18.sp
                         )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Son Photos (az_s1, az_s2, az_s3)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s1),
+                                contentDescription = "Angel Zaberski Jr. 1",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s2),
+                                contentDescription = "Angel Zaberski Jr. 2",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s3),
+                                contentDescription = "Angel Zaberski Jr. 3",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
                     } else {
                         // --- FATHER (ENG) ---
                         Text(
@@ -428,6 +507,33 @@ fun PianoScreen() {
                             fontSize = 13.sp,
                             lineHeight = 18.sp
                         )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Father Photos (az_f1 & az_f2)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.az_f1),
+                                contentDescription = "Angel Zaberski Sr. 1",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(130.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_f2),
+                                contentDescription = "Angel Zaberski Sr. 2",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(130.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
 
                         // --- 3 BLANK LINES ---
                         Spacer(modifier = Modifier.height(28.dp))
@@ -451,6 +557,42 @@ fun PianoScreen() {
                             fontSize = 13.sp,
                             lineHeight = 18.sp
                         )
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // Son Photos (az_s1, az_s2, az_s3)
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s1),
+                                contentDescription = "Angel Zaberski Jr. 1",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s2),
+                                contentDescription = "Angel Zaberski Jr. 2",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                            Image(
+                                painter = painterResource(id = R.drawable.az_s3),
+                                contentDescription = "Angel Zaberski Jr. 3",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(110.dp)
+                                    .clip(RoundedCornerShape(8.dp)),
+                                contentScale = ContentScale.Crop
+                            )
+                        }
                     }
                 }
             },
@@ -460,7 +602,6 @@ fun PianoScreen() {
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Button to toggle language
                     OutlinedButton(
                         onClick = {
                             creditsLanguage = if (creditsLanguage == "BG") "ENG" else "BG"
