@@ -35,11 +35,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.Locale
 import kotlin.math.pow
 import kotlin.math.sqrt
 
 enum class ChordMode { NONE, MAJOR, MINOR }
+enum class SustainMode { NONE, HALF, FULL }
 
 data class BlackKeyInfo(
     val whiteIndex: Int,
@@ -77,7 +77,8 @@ fun PianoScreen() {
 
     var currentOctave by remember { mutableFloatStateOf(4f) }
     var chordMode by remember { mutableStateOf(ChordMode.NONE) }
-    var sustainEnabled by remember { mutableStateOf(false) }
+    var sustainMode by remember { mutableStateOf(SustainMode.NONE) }
+    var dynamicEnabled by remember { mutableStateOf(false) }
 
     // Sensor readings & Peak Hold logic (100ms decay)
     var liveShakeMagnitude by remember { mutableFloatStateOf(0f) }
@@ -128,7 +129,6 @@ fun PianoScreen() {
                     val magnitude = sqrt(x * x + y * y + z * z)
                     liveShakeMagnitude = magnitude
 
-                    // Track peak acceleration with fast 100ms decay
                     if (magnitude > maxShakeMagnitude) {
                         maxShakeMagnitude = magnitude
                         maxResetJob?.cancel()
@@ -199,9 +199,12 @@ fun PianoScreen() {
         val started = newExpandedNotes - activeMidiNotes
         val ended = activeMidiNotes - newExpandedNotes
 
-        // Capture peak acceleration within the 100ms window (or live fallback)
-        val effectiveMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
-        val initialVol = getDynamicVolume(effectiveMagnitude)
+        val initialVol = if (dynamicEnabled) {
+            val effectiveMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
+            getDynamicVolume(effectiveMagnitude)
+        } else {
+            1.0f
+        }
 
         started.forEach { note ->
             activeMidiNotes.add(note)
@@ -215,17 +218,38 @@ fun PianoScreen() {
 
         ended.forEach { note ->
             activeMidiNotes.remove(note)
-            if (!sustainEnabled) {
-                activeStreams[note]?.let { streamId ->
-                    activeStreams.remove(note)
-                    coroutineScope.launch(Dispatchers.Default) {
-                        val steps = 6
-                        for (i in steps downTo 0) {
-                            val vol = (i / steps.toFloat()) * initialVol
-                            soundPool.setVolume(streamId, vol, vol)
-                            delay(20L)
+            when (sustainMode) {
+                SustainMode.FULL -> {
+                    // Note keeps ringing indefinitely
+                }
+                SustainMode.HALF -> {
+                    // Medium release fade (~600ms release length)
+                    activeStreams[note]?.let { streamId ->
+                        activeStreams.remove(note)
+                        coroutineScope.launch(Dispatchers.Default) {
+                            val steps = 15
+                            for (i in steps downTo 0) {
+                                val vol = (i / steps.toFloat()) * initialVol
+                                soundPool.setVolume(streamId, vol, vol)
+                                delay(40L)
+                            }
+                            soundPool.stop(streamId)
                         }
-                        soundPool.stop(streamId)
+                    }
+                }
+                SustainMode.NONE -> {
+                    // Normal fast release fade (~120ms release length)
+                    activeStreams[note]?.let { streamId ->
+                        activeStreams.remove(note)
+                        coroutineScope.launch(Dispatchers.Default) {
+                            val steps = 6
+                            for (i in steps downTo 0) {
+                                val vol = (i / steps.toFloat()) * initialVol
+                                soundPool.setVolume(streamId, vol, vol)
+                                delay(20L)
+                            }
+                            soundPool.stop(streamId)
+                        }
                     }
                 }
             }
@@ -287,52 +311,20 @@ fun PianoScreen() {
                 }
             }
 
-            // Dual High-Visibility Debug Sensor Display
-            Box(
-                modifier = Modifier
-                    .background(Color(0xFF2E0000), RoundedCornerShape(8.dp))
-                    .border(width = 1.dp, color = Color.Red, shape = RoundedCornerShape(8.dp))
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = "SENSOR / ACCELERATION",
-                        color = Color.Red,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("LIVE", color = Color.Gray, fontSize = 9.sp)
-                            Text(
-                                text = String.format(Locale.US, "%.3f", liveShakeMagnitude),
-                                color = Color.Yellow,
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Text("|", color = Color.Red, fontSize = 18.sp)
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("MAX (100ms)", color = Color.Gray, fontSize = 9.sp)
-                            Text(
-                                text = String.format(Locale.US, "%.3f", maxShakeMagnitude),
-                                color = Color(0xFFFF9800),
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.ExtraBold
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Controls & Chords
+            // Controls, Dynamics, Chords & Sustain Modes
             Row(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                ControlChip(
+                    text = "Dynamic",
+                    isActive = dynamicEnabled,
+                    activeColor = Color(0xFF2196F3),
+                    onClick = {
+                        dynamicEnabled = !dynamicEnabled
+                    }
+                )
+
                 ControlChip(
                     text = "Major Chord",
                     isActive = chordMode == ChordMode.MAJOR,
@@ -354,11 +346,20 @@ fun PianoScreen() {
                 )
 
                 ControlChip(
+                    text = "Sustain 1/2",
+                    isActive = sustainMode == SustainMode.HALF,
+                    activeColor = Color(0xFF81C784),
+                    onClick = {
+                        sustainMode = if (sustainMode == SustainMode.HALF) SustainMode.NONE else SustainMode.HALF
+                    }
+                )
+
+                ControlChip(
                     text = "Sustain",
-                    isActive = sustainEnabled,
+                    isActive = sustainMode == SustainMode.FULL,
                     activeColor = Color(0xFF4CAF50),
                     onClick = {
-                        sustainEnabled = !sustainEnabled
+                        sustainMode = if (sustainMode == SustainMode.FULL) SustainMode.NONE else SustainMode.FULL
                     }
                 )
             }
@@ -434,7 +435,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(baseOctave, chordMode) {
+                    .pointerInput(baseOctave, chordMode, dynamicEnabled, sustainMode) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
