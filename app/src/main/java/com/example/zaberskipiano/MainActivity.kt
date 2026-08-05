@@ -377,23 +377,9 @@ fun PianoScreen() {
                         fontWeight = FontWeight.Medium
                     )
 
-                    Spacer(modifier = Modifier.height(2.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // 1. Boomerang Video Player
-                    BoomerangVideoPlayer(
-                        videoResId = R.raw.zaberski_plays_piano,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(260.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable {
-                                activeFullscreenMedia = FullscreenMedia.VideoRes(R.raw.zaberski_plays_piano)
-                            }
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // 2. Joint Photo
+                    // 1. Joint Photo
                     Image(
                         painter = painterResource(id = R.drawable.az_fs),
                         contentDescription = "Angel Zaberski Father and Son",
@@ -650,7 +636,7 @@ fun PianoScreen() {
                         }
                     }
 
-                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ И ЛИНКОВЕ НАЙ-ДОЛУ ---
+                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ И ЛИНКОВЕ ---
                     Spacer(modifier = Modifier.height(20.dp))
                     Box(
                         modifier = Modifier
@@ -692,6 +678,35 @@ fun PianoScreen() {
                                 openUrl("https://music.nbu.bg/bg/teachers/doc-d-r-angel-zaberski-1329")
                             }
                             .padding(vertical = 3.dp)
+                    )
+
+                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ, "ПОКЛОН !" И ВИДЕО НАЙ-ДОЛУ ---
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.Gray.copy(alpha = 0.4f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "1936  -  ∞",
+                        color = amberColor,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+
+                    BoomerangVideoPlayer(
+                        videoResId = R.raw.zaberski_plays_piano,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                activeFullscreenMedia = FullscreenMedia.VideoRes(R.raw.zaberski_plays_piano)
+                            }
                     )
                 }
             },
