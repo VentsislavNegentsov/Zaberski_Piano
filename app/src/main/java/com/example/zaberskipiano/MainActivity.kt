@@ -12,12 +12,13 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
@@ -44,7 +45,18 @@ import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
 
-enum class ChordMode { NONE, MAJOR, MINOR }
+enum class HarmonyMode(val displayName: String) {
+    NONE("Single Note"),
+    MAJOR("Major"),
+    MINOR("Minor"),
+    MAJ7("Maj7"),
+    MIN7("Min7"),
+    DOM9("Dom9 Jazz"),
+    QUARTAL("Quartal Modern"),
+    DIM7("Diminished 7th"),
+    LUSH11("Lush 11th")
+}
+
 enum class SustainMode { NONE, HALF, FULL }
 
 class MainActivity : ComponentActivity() {
@@ -76,7 +88,7 @@ fun PianoScreen() {
     val coroutineScope = rememberCoroutineScope()
 
     var firstWhiteKeyIndex by remember { mutableIntStateOf(21) }
-    var chordMode by remember { mutableStateOf(ChordMode.NONE) }
+    var harmonyMode by remember { mutableStateOf(HarmonyMode.NONE) }
     var sustainMode by remember { mutableStateOf(SustainMode.HALF) }
     var dynamicEnabled by remember { mutableStateOf(false) }
     var isKeySizeEnlarged by remember { mutableStateOf(false) }
@@ -111,7 +123,7 @@ fun PianoScreen() {
             .build()
 
         SoundPool.Builder()
-            .setMaxStreams(16)
+            .setMaxStreams(32) // Upgraded max audio streams to support rich, multi-note polyphonic voicings
             .setAudioAttributes(attributes)
             .build()
     }
@@ -192,18 +204,24 @@ fun PianoScreen() {
         return soundPool.play(soundId, velocity, velocity, 1, 0, rate)
     }
 
-    fun getChordMidiNotes(rootMidi: Int): List<Int> {
-        return when (chordMode) {
-            ChordMode.NONE -> listOf(rootMidi)
-            ChordMode.MAJOR -> listOf(rootMidi, rootMidi + 4, rootMidi + 7)
-            ChordMode.MINOR -> listOf(rootMidi, rootMidi + 3, rootMidi + 7)
+    fun getHarmonyMidiNotes(rootMidi: Int): List<Int> {
+        return when (harmonyMode) {
+            HarmonyMode.NONE -> listOf(rootMidi)
+            HarmonyMode.MAJOR -> listOf(rootMidi, rootMidi + 4, rootMidi + 7)
+            HarmonyMode.MINOR -> listOf(rootMidi, rootMidi + 3, rootMidi + 7)
+            HarmonyMode.MAJ7 -> listOf(rootMidi, rootMidi + 4, rootMidi + 7, rootMidi + 11)
+            HarmonyMode.MIN7 -> listOf(rootMidi, rootMidi + 3, rootMidi + 7, rootMidi + 10)
+            HarmonyMode.DOM9 -> listOf(rootMidi, rootMidi + 4, rootMidi + 7, rootMidi + 10, rootMidi + 14)
+            HarmonyMode.QUARTAL -> listOf(rootMidi, rootMidi + 5, rootMidi + 10, rootMidi + 15)
+            HarmonyMode.DIM7 -> listOf(rootMidi, rootMidi + 3, rootMidi + 6, rootMidi + 9)
+            HarmonyMode.LUSH11 -> listOf(rootMidi, rootMidi + 4, rootMidi + 7, rootMidi + 10, rootMidi + 14, rootMidi + 17)
         }
     }
 
     fun updateActiveNotes(newDirectNotes: Set<Int>) {
         val newExpandedNotes = mutableSetOf<Int>()
         newDirectNotes.forEach { root ->
-            newExpandedNotes.addAll(getChordMidiNotes(root))
+            newExpandedNotes.addAll(getHarmonyMidiNotes(root))
         }
 
         val started = newExpandedNotes - activeMidiNotes
@@ -288,7 +306,7 @@ fun PianoScreen() {
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "v1.3",
+                        text = "v1.4",
                         color = amberColor.copy(alpha = 0.8f),
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Medium
@@ -305,7 +323,7 @@ fun PianoScreen() {
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "\ndedicated to Zaberski father & son",
+                        text = "dedicated to Zaberski father & son",
                         color = amberColor.copy(alpha = 0.85f),
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Light
@@ -336,8 +354,7 @@ fun PianoScreen() {
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 4.dp, vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalAlignment = Alignment.CenterVertically
         ) {
             // Credits Button
             ControlChip(
@@ -347,11 +364,28 @@ fun PianoScreen() {
                 onClick = { showCreditsDialog = true }
             )
 
-            // Controls
+            Spacer(modifier = Modifier.width(6.dp))
+
+            // Horizontally Scrollable Controls Row
             Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Dynamic Harmony Preset Cycle Button
+                ControlChip(
+                    text = "Harmony: ${harmonyMode.displayName}",
+                    isActive = harmonyMode != HarmonyMode.NONE,
+                    activeColor = amberColor,
+                    onClick = {
+                        val nextOrdinal = (harmonyMode.ordinal + 1) % HarmonyMode.values().size
+                        harmonyMode = HarmonyMode.values()[nextOrdinal]
+                        updateActiveNotes(directPressedNotes.toSet())
+                    }
+                )
+
                 ControlChip(
                     text = "Black Keys Precision",
                     isActive = blackKeysEasyHit,
@@ -378,26 +412,6 @@ fun PianoScreen() {
                     isActive = dynamicEnabled,
                     activeColor = amberColor,
                     onClick = { dynamicEnabled = !dynamicEnabled }
-                )
-
-                ControlChip(
-                    text = "Major Chord",
-                    isActive = chordMode == ChordMode.MAJOR,
-                    activeColor = amberColor,
-                    onClick = {
-                        chordMode = if (chordMode == ChordMode.MAJOR) ChordMode.NONE else ChordMode.MAJOR
-                        updateActiveNotes(directPressedNotes.toSet())
-                    }
-                )
-
-                ControlChip(
-                    text = "Minor Chord",
-                    isActive = chordMode == ChordMode.MINOR,
-                    activeColor = amberColor,
-                    onClick = {
-                        chordMode = if (chordMode == ChordMode.MINOR) ChordMode.NONE else ChordMode.MINOR
-                        updateActiveNotes(directPressedNotes.toSet())
-                    }
                 )
 
                 ControlChip(
@@ -487,7 +501,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(firstWhiteKeyIndex, chordMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
+                    .pointerInput(firstWhiteKeyIndex, harmonyMode, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
