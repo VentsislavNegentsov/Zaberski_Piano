@@ -2,13 +2,17 @@ package com.example.zaberskipiano
 
 import android.app.Activity
 import android.content.Context
+import android.graphics.Bitmap
 import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
 import android.media.AudioAttributes
+import android.media.MediaMetadataRetriever
 import android.media.SoundPool
+import android.net.Uri
 import android.os.Bundle
+import androidx.annotation.RawRes
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
@@ -32,6 +36,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -39,16 +45,29 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
+
+// Кеш в паметта за видеото
+private var globalBoomerangCache: List<ImageBitmap>? = null
+
+// Модел за медия на пълен екран
+sealed class FullscreenMedia {
+    data class ImageRes(val resId: Int) : FullscreenMedia()
+    data class VideoRes(val resId: Int) : FullscreenMedia()
+}
 
 enum class HarmonyMode(val displayName: String) {
     NONE("Single Note"),
@@ -105,6 +124,9 @@ fun PianoScreen() {
     var navLocked by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
     var creditsLanguage by remember { mutableStateOf("BG") }
+
+    // Състояние за медия на цял екран
+    var activeFullscreenMedia by remember { mutableStateOf<FullscreenMedia?>(null) }
 
     val numVisibleWhiteKeys = if (isKeySizeEnlarged) 9 else 14
     val maxFirstIndex = 49 - numVisibleWhiteKeys
@@ -322,53 +344,59 @@ fun PianoScreen() {
     if (showCreditsDialog) {
         AlertDialog(
             onDismissRequest = { showCreditsDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Zaberski Piano",
-                        color = amberColor,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "v1.3",
-                        color = amberColor.copy(alpha = 0.8f),
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-            },
             text = {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(max = 400.dp)
+                        .heightIn(max = 480.dp)
                         .verticalScroll(rememberScrollState())
                 ) {
                     Text(
-                        text = if (creditsLanguage == "BG") "от Венцислав Негенцов" else "by Ventsislav Negentsov",
-                        color = Color.White,
-                        fontSize = 15.sp,
+                        text = "Zaberski Piano v1.3",
+                        color = amberColor,
+                        fontSize = 17.sp,
                         fontWeight = FontWeight.Bold
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = if (creditsLanguage == "BG") "от Венцислав Негенцов" else "by Ventsislav Negentsov",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
                     Text(
                         text = if (creditsLanguage == "BG") "Посвещава се на баща и син Заберски" else "Dedicated to Zaberski father & son",
                         color = amberColor.copy(alpha = 0.85f),
-                        fontSize = 13.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
                     )
-                    Spacer(modifier = Modifier.height(10.dp))
 
-                    // Joint Photo (Father & Son)
+                    Spacer(modifier = Modifier.height(2.dp))
+
+                    // 1. Boomerang Video Player
+                    BoomerangVideoPlayer(
+                        videoResId = R.raw.zaberski_plays_piano,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(260.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                activeFullscreenMedia = FullscreenMedia.VideoRes(R.raw.zaberski_plays_piano)
+                            }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // 2. Joint Photo
                     Image(
                         painter = painterResource(id = R.drawable.az_fs),
                         contentDescription = "Angel Zaberski Father and Son",
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(160.dp)
-                            .clip(RoundedCornerShape(8.dp)),
+                            .height(180.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_fs)
+                            },
                         contentScale = ContentScale.Fit
                     )
 
@@ -382,7 +410,6 @@ fun PianoScreen() {
                     Spacer(modifier = Modifier.height(12.dp))
 
                     if (creditsLanguage == "BG") {
-                        // --- FATHER (BG) ---
                         Text(
                             text = "Ангел Заберски – баща (1936–2011)",
                             color = amberColor,
@@ -395,7 +422,7 @@ fun PianoScreen() {
                                     "• Произход и образование: Роден е на 8 февруари 1936 г. Завършва Държавната музикална академия в София със специалност оперно пеене в класа на проф. Христо Бръмбаров.\n\n" +
                                     "• Професионален път: Работи дълги години като музикален редактор и аранжор в Българското национално радио, където създава и обработва стотици произведения за оркестри и популярни изпълнители.\n\n" +
                                     "• Емблематични композиции: Автор е на някои от най-големите класики в българската музика. Неговата песен „Калиакра“ (в изпълнение на Лили Иванова) печели първа награда на фестивала „Златният Орфей“ през 1966 г. Създава още поп класики като „Лилей“, „Бяла песен“, както и редица хитове за Маргарет Николова, Йорданка Христова, Бисер Киров и Орлин Горанов.\n\n" +
-                                    "• Педагогическо наследство: Като дългогодишен преподавател подготвя поколения български поп и джаз пеещи таланти, предавайки им високи академични стандарти за вокална техника.\n\n" +
+                                    "• Педагогически наследство: Като дългогодишен преподавател подготвя поколения български поп и джаз пеещи таланти, предавайки им високи академични стандарти за вокална техника.\n\n" +
                                     "• Музикално семейство: Баща е на джаз пианиста и композитор Ангел Заберски-син и на певицата Неда Заберска, които продължават творческия род.",
                             color = Color.White.copy(alpha = 0.9f),
                             fontSize = 13.sp,
@@ -404,7 +431,6 @@ fun PianoScreen() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Father Photos (az_f1 & az_f2)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -414,8 +440,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Sr. 1",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_f1)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -423,16 +452,17 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Sr. 2",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_f2)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                         }
 
-                        // --- 3 BLANK LINES ---
                         Spacer(modifier = Modifier.height(28.dp))
 
-                        // --- SON (BG) ---
                         Text(
                             text = "Ангел Заберски – син (род. 1973 г.)",
                             color = amberColor,
@@ -454,7 +484,6 @@ fun PianoScreen() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Son Photos (az_s1, az_s2, az_s3)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -464,8 +493,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 1",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s1)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -473,8 +505,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 2",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s2)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -482,13 +517,15 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 3",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s3)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                         }
                     } else {
-                        // --- FATHER (ENG) ---
                         Text(
                             text = "Angel Zaberski - Father (1936–2011)",
                             color = amberColor,
@@ -510,7 +547,6 @@ fun PianoScreen() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Father Photos (az_f1 & az_f2)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -520,8 +556,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Sr. 1",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_f1)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -529,16 +568,17 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Sr. 2",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(140.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_f2)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                         }
 
-                        // --- 3 BLANK LINES ---
                         Spacer(modifier = Modifier.height(28.dp))
 
-                        // --- SON (ENG) ---
                         Text(
                             text = "Angel Zaberski - Son (b. 1973)",
                             color = amberColor,
@@ -560,7 +600,6 @@ fun PianoScreen() {
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Son Photos (az_s1, az_s2, az_s3)
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -570,8 +609,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 1",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s1)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -579,8 +621,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 2",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s2)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                             Image(
@@ -588,8 +633,11 @@ fun PianoScreen() {
                                 contentDescription = "Angel Zaberski Jr. 3",
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(110.dp)
-                                    .clip(RoundedCornerShape(8.dp)),
+                                    .height(120.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.az_s3)
+                                    },
                                 contentScale = ContentScale.Crop
                             )
                         }
@@ -600,33 +648,42 @@ fun PianoScreen() {
                 Row(
                     horizontalArrangement = Arrangement.End,
                     verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 0.dp, bottom = 0.dp)
                 ) {
                     OutlinedButton(
                         onClick = {
                             creditsLanguage = if (creditsLanguage == "BG") "ENG" else "BG"
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = amberColor),
-                        modifier = Modifier.padding(end = 8.dp)
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
+                        modifier = Modifier
+                            .height(28.dp)
+                            .padding(end = 6.dp)
                     ) {
                         Text(
                             text = if (creditsLanguage == "BG") "ENG" else "BG",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
+                            fontSize = 11.sp
                         )
                     }
 
-                    TextButton(onClick = { showCreditsDialog = false }) {
+                    TextButton(
+                        onClick = { showCreditsDialog = false },
+                        modifier = Modifier.height(28.dp),
+                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                    ) {
                         Text(
                             text = if (creditsLanguage == "BG") "Затвори" else "Close",
                             color = amberColor,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
                         )
                     }
                 }
             },
             containerColor = Color(0xFF2A2A2A),
-            titleContentColor = Color.White,
             textContentColor = Color.White
         )
     }
@@ -646,7 +703,6 @@ fun PianoScreen() {
                 .padding(horizontal = 4.dp, vertical = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Credits Button
             ControlChip(
                 text = "Credits",
                 isActive = showCreditsDialog,
@@ -656,7 +712,6 @@ fun PianoScreen() {
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Horizontally Scrollable Controls Row
             Row(
                 modifier = Modifier
                     .weight(1f)
@@ -664,7 +719,6 @@ fun PianoScreen() {
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Harmony Preset Cycle Button
                 ControlChip(
                     text = "Harmony: ${harmonyMode.displayName}",
                     isActive = harmonyMode != HarmonyMode.NONE,
@@ -680,7 +734,6 @@ fun PianoScreen() {
                     }
                 )
 
-                // Bass Line Toggle Button
                 ControlChip(
                     text = "Bass Line",
                     isActive = bassLineEnabled,
@@ -740,7 +793,6 @@ fun PianoScreen() {
 
             Spacer(modifier = Modifier.width(6.dp))
 
-            // Break / Exit App Button (TOP RIGHT)
             ControlChip(
                 text = "Break",
                 isActive = false,
@@ -859,7 +911,7 @@ fun PianoScreen() {
                     }
                 }
 
-                // Render Black Keys dynamically aligned
+                // Render Black Keys
                 val density = LocalContext.current.resources.displayMetrics.density
                 for (i in 0 until numVisibleWhiteKeys) {
                     val globalIndex = firstWhiteKeyIndex + i
@@ -1031,6 +1083,137 @@ fun PianoScreen() {
             }
         }
     }
+
+    // --- FULLSCREEN MEDIA OVERLAY (Изведен в Dialog за да е НАД ВСИЧКО) ---
+    activeFullscreenMedia?.let { media ->
+        Dialog(
+            onDismissRequest = { activeFullscreenMedia = null },
+            properties = DialogProperties(
+                usePlatformDefaultWidth = false,
+                decorFitsSystemWindows = false
+            )
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+                    .clickable { activeFullscreenMedia = null },
+                contentAlignment = Alignment.Center
+            ) {
+                when (media) {
+                    is FullscreenMedia.ImageRes -> {
+                        Image(
+                            painter = painterResource(id = media.resId),
+                            contentDescription = "Fullscreen Image",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Fit
+                        )
+                    }
+                    is FullscreenMedia.VideoRes -> {
+                        BoomerangVideoPlayer(
+                            videoResId = media.resId,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun BoomerangVideoPlayer(
+    @RawRes videoResId: Int,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    var frames by remember { mutableStateOf<List<ImageBitmap>>(globalBoomerangCache ?: emptyList()) }
+    var currentFrameIndex by remember { mutableIntStateOf(0) }
+    var isLoading by remember { mutableStateOf(frames.isEmpty()) }
+
+    LaunchedEffect(videoResId) {
+        if (globalBoomerangCache != null) {
+            frames = globalBoomerangCache!!
+            isLoading = false
+            return@LaunchedEffect
+        }
+
+        withContext(Dispatchers.IO) {
+            val retriever = MediaMetadataRetriever()
+            try {
+                val uri = Uri.parse("android.resource://${context.packageName}/$videoResId")
+                retriever.setDataSource(context, uri)
+
+                val durationMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLong() ?: 1000L
+                val extracted = mutableListOf<ImageBitmap>()
+
+                val stepMs = 70L
+                for (timeMs in 0 until durationMs step stepMs) {
+                    val bitmap = retriever.getFrameAtTime(timeMs * 1000, MediaMetadataRetriever.OPTION_CLOSEST)
+                    bitmap?.let { raw ->
+                        val scaled = if (raw.width > 480) {
+                            val aspectRatio = raw.height.toFloat() / raw.width.toFloat()
+                            Bitmap.createScaledBitmap(raw, 480, (480 * aspectRatio).toInt(), true)
+                        } else raw
+
+                        extracted.add(scaled.asImageBitmap())
+                    }
+                }
+
+                globalBoomerangCache = extracted
+                frames = extracted
+            } catch (e: Exception) {
+                e.printStackTrace()
+            } finally {
+                retriever.release()
+                isLoading = false
+            }
+        }
+    }
+
+    LaunchedEffect(frames) {
+        if (frames.isNotEmpty()) {
+            var forward = true
+            while (isActive) {
+                delay(45L)
+                if (forward) {
+                    currentFrameIndex++
+                    if (currentFrameIndex >= frames.size - 1) {
+                        forward = false
+                    }
+                } else {
+                    currentFrameIndex--
+                    if (currentFrameIndex <= 0) {
+                        forward = true
+                    }
+                }
+            }
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF1E1E1E)),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = Color(0xFFFFB300),
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+        } else if (frames.isNotEmpty()) {
+            Image(
+                bitmap = frames[currentFrameIndex],
+                contentDescription = "Boomerang Video",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Fit
+            )
+        }
+    }
 }
 
 @Composable
@@ -1072,8 +1255,8 @@ fun WhiteKeyVisual(
     modifier: Modifier = Modifier
 ) {
     val keyColor = when (keyState) {
-        KeyPressedState.DIRECT -> Color(0xFF808080)   // Direct Finger Touch: Grey
-        KeyPressedState.HARMONY -> Color(0xFFD0D0D0)  // Harmony/Bass Addition: Light Grey
+        KeyPressedState.DIRECT -> Color(0xFF808080)
+        KeyPressedState.HARMONY -> Color(0xFFD0D0D0)
         KeyPressedState.NONE -> Color.White
     }
 
@@ -1103,8 +1286,8 @@ fun BlackKeyVisual(
     modifier: Modifier = Modifier
 ) {
     val keyColor = when (keyState) {
-        KeyPressedState.DIRECT -> Color(0xFF555555)   // Direct Finger Touch: Dark Grey
-        KeyPressedState.HARMONY -> Color(0xFFAAAAAA)  // Harmony/Bass Addition: Light Grey
+        KeyPressedState.DIRECT -> Color(0xFF555555)
+        KeyPressedState.HARMONY -> Color(0xFFAAAAAA)
         KeyPressedState.NONE -> Color(0xFF151515)
     }
 
