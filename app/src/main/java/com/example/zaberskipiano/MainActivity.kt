@@ -122,7 +122,6 @@ fun PianoScreen() {
     var dynamicEnabled by remember { mutableStateOf(false) }
     var isKeySizeEnlarged by remember { mutableStateOf(false) }
     var noLabels by remember { mutableStateOf(true) }
-    var blackKeysEasyHit by remember { mutableStateOf(true) }
     var navLocked by remember { mutableStateOf(false) }
     var showCreditsDialog by remember { mutableStateOf(false) }
     var creditsLanguage by remember { mutableStateOf("BG") }
@@ -680,7 +679,7 @@ fun PianoScreen() {
                             .padding(vertical = 3.dp)
                     )
 
-                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ, "ПОКЛОН !" И ВИДЕО НАЙ-ДОЛУ ---
+                    // --- ХОРИЗОНТАЛЕН РАЗДЕЛИТЕЛ, "ПОКЛОН !" И ВИДЕО ---
                     Spacer(modifier = Modifier.height(20.dp))
                     Box(
                         modifier = Modifier
@@ -707,6 +706,39 @@ fun PianoScreen() {
                             .clickable {
                                 activeFullscreenMedia = FullscreenMedia.VideoRes(R.raw.zaberski_plays_piano)
                             }
+                    )
+
+                    // --- ANGEL ZABERSKI AND ME SECTION ---
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color.Gray.copy(alpha = 0.4f))
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Angel Zaberski and me :)",
+                        color = amberColor,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Image(
+                        painter = painterResource(id = R.drawable.zaberski_and_me),
+                        contentDescription = "Angel Zaberski and me",
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable {
+                                activeFullscreenMedia = FullscreenMedia.ImageRes(R.drawable.zaberski_and_me)
+                            },
+                        contentScale = ContentScale.Fit
                     )
                 }
             },
@@ -811,13 +843,6 @@ fun PianoScreen() {
                 )
 
                 ControlChip(
-                    text = "Black Keys Precision",
-                    isActive = blackKeysEasyHit,
-                    activeColor = amberColor,
-                    onClick = { blackKeysEasyHit = !blackKeysEasyHit }
-                )
-
-                ControlChip(
                     text = "No Labels",
                     isActive = noLabels,
                     activeColor = amberColor,
@@ -893,36 +918,22 @@ fun PianoScreen() {
                 if (x < 0 || x > totalWidthPx || y < 0 || y > totalHeightPx) return null
 
                 if (y <= blackKeyHeightPx) {
-                    if (blackKeysEasyHit) {
-                        var closestBlackNote: Int? = null
-                        var minDistance = Float.MAX_VALUE
+                    var closestBlackNote: Int? = null
+                    var minDistance = Float.MAX_VALUE
 
-                        for (i in 0 until numVisibleWhiteKeys) {
-                            val globalIndex = firstWhiteKeyIndex + i
-                            val noteInOctave = globalIndex % 7
-                            if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
-                                val blackKeyCenterX = whiteKeyWidthPx * (i + 1)
-                                val distance = abs(x - blackKeyCenterX)
-                                if (distance < minDistance) {
-                                    minDistance = distance
-                                    closestBlackNote = getMidiForWhiteKey(globalIndex) + 1
-                                }
-                            }
-                        }
-                        return closestBlackNote
-                    } else {
-                        for (i in 0 until numVisibleWhiteKeys) {
-                            val globalIndex = firstWhiteKeyIndex + i
-                            val noteInOctave = globalIndex % 7
-                            if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
-                                val left = (whiteKeyWidthPx * (i + 1)) - (blackKeyWidthPx / 2f)
-                                val right = left + blackKeyWidthPx
-                                if (x in left..right) {
-                                    return getMidiForWhiteKey(globalIndex) + 1
-                                }
+                    for (i in 0 until numVisibleWhiteKeys) {
+                        val globalIndex = firstWhiteKeyIndex + i
+                        val noteInOctave = globalIndex % 7
+                        if (noteInOctave in listOf(0, 1, 3, 4, 5)) {
+                            val blackKeyCenterX = whiteKeyWidthPx * (i + 1)
+                            val distance = abs(x - blackKeyCenterX)
+                            if (distance < minDistance) {
+                                minDistance = distance
+                                closestBlackNote = getMidiForWhiteKey(globalIndex) + 1
                             }
                         }
                     }
+                    return closestBlackNote
                 }
 
                 val keyRelativeIndex = (x / whiteKeyWidthPx).toInt().coerceIn(0, numVisibleWhiteKeys - 1)
@@ -932,7 +943,7 @@ fun PianoScreen() {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .pointerInput(firstWhiteKeyIndex, harmonyMode, bassLineEnabled, dynamicEnabled, sustainMode, numVisibleWhiteKeys, blackKeysEasyHit) {
+                    .pointerInput(firstWhiteKeyIndex, harmonyMode, bassLineEnabled, dynamicEnabled, sustainMode, numVisibleWhiteKeys) {
                         awaitEachGesture {
                             while (true) {
                                 val event = awaitPointerEvent()
