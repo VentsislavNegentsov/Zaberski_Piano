@@ -138,6 +138,9 @@ fun PianoScreen() {
 
     var liveShakeMagnitude by remember { mutableFloatStateOf(0f) }
     var maxShakeMagnitude by remember { mutableFloatStateOf(0f) }
+    var calibratedMaxMagnitude by remember { mutableFloatStateOf(0.15f) }
+    var magnitudeSum by remember { mutableFloatStateOf(0.15f) }
+    var magnitudeCount by remember { mutableIntStateOf(1) }
     var maxResetJob by remember { mutableStateOf<Job?>(null) }
 
     var lastPlayedStreamId by remember { mutableIntStateOf(0) }
@@ -145,6 +148,7 @@ fun PianoScreen() {
     val directPressedNotes = remember { mutableStateSetOf<Int>() }
     val activeMidiNotes = remember { mutableStateSetOf<Int>() }
     val activeStreams = remember { mutableStateMapOf<Int, Int>() }
+    val activeNotesVolume = remember { mutableStateMapOf<Int, Float>() }
 
     val amberColor = Color(0xFFFFB300)
 
@@ -167,7 +171,7 @@ fun PianoScreen() {
     }
 
     fun getDynamicVolume(magnitude: Float): Float {
-        val normalized = (magnitude / 0.1f).coerceIn(0f, 1f)
+        val normalized = (magnitude / calibratedMaxMagnitude.coerceAtLeast(0.01f)).coerceIn(0f, 1f)
         return (0.15f + normalized * 0.85f).coerceIn(0.15f, 1.0f)
     }
 
@@ -276,6 +280,15 @@ fun PianoScreen() {
         val started = newExpandedNotes - activeMidiNotes
         val ended = activeMidiNotes - newExpandedNotes
 
+        if (started.isNotEmpty() && dynamicEnabled) {
+            val strikeMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
+            if (strikeMagnitude > 0.01f) {
+                magnitudeSum += strikeMagnitude
+                magnitudeCount++
+                calibratedMaxMagnitude = magnitudeSum / magnitudeCount
+            }
+        }
+
         val initialVol = if (dynamicEnabled) {
             val effectiveMagnitude = if (maxShakeMagnitude > 0f) maxShakeMagnitude else liveShakeMagnitude
             getDynamicVolume(effectiveMagnitude)
@@ -289,12 +302,16 @@ fun PianoScreen() {
             val streamId = playMidiNote(note, initialVol)
             if (streamId != 0) {
                 activeStreams[note] = streamId
+                activeNotesVolume[note] = initialVol
                 lastPlayedStreamId = streamId
             }
         }
 
         ended.forEach { note ->
             activeMidiNotes.remove(note)
+            val originalVol = activeNotesVolume[note] ?: 1.0f
+            activeNotesVolume.remove(note)
+
             when (sustainMode) {
                 SustainMode.FULL -> {}
                 SustainMode.HALF -> {
@@ -303,7 +320,7 @@ fun PianoScreen() {
                         coroutineScope.launch(Dispatchers.Default) {
                             val steps = 15
                             for (i in steps downTo 0) {
-                                val vol = (i / steps.toFloat()) * initialVol
+                                val vol = (i / steps.toFloat()) * originalVol
                                 soundPool.setVolume(streamId, vol, vol)
                                 delay(40L)
                             }
@@ -317,7 +334,7 @@ fun PianoScreen() {
                         coroutineScope.launch(Dispatchers.Default) {
                             val steps = 6
                             for (i in steps downTo 0) {
-                                val vol = (i / steps.toFloat()) * initialVol
+                                val vol = (i / steps.toFloat()) * originalVol
                                 soundPool.setVolume(streamId, vol, vol)
                                 delay(20L)
                             }
@@ -860,7 +877,9 @@ fun PianoScreen() {
                     text = "Dynamic",
                     isActive = dynamicEnabled,
                     activeColor = amberColor,
-                    onClick = { dynamicEnabled = !dynamicEnabled }
+                    onClick = { 
+                        dynamicEnabled = !dynamicEnabled
+                    }
                 )
 
                 ControlChip(
