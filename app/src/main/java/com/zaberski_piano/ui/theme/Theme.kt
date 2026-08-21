@@ -1,4 +1,4 @@
-package com.example.zaberskipiano.ui.theme
+package com.zaberski_piano.ui.theme
 
 import android.app.Activity
 import android.os.Build

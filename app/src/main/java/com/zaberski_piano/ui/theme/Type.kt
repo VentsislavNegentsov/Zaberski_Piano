@@ -1,4 +1,4 @@
-package com.example.zaberskipiano.ui.theme
+package com.zaberski_piano.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle

@@ -1,4 +1,4 @@
-package com.example.zaberskipiano
+package com.zaberski_piano
 
 import org.junit.Test
 

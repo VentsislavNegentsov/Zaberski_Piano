@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.zaberskipiano"
+    namespace = "com.zaberski_piano"
     compileSdk {
         version = release(37) {
             minorApiLevel = 1
@@ -12,7 +12,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.zaberskipiano"
+        applicationId = "com.zaberski_piano"
         minSdk = 24
         targetSdk = 37
         versionCode = 1
